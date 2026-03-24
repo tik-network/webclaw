@@ -5,13 +5,15 @@
 /// to the webclaw cloud API (api.webclaw.io) when bot protection or
 /// JS rendering is detected. Set WEBCLAW_API_KEY for automatic fallback.
 use std::sync::Arc;
+use std::time::Duration;
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Implementation, ServerCapabilities, ServerInfo};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde_json::json;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
+use url::Url;
 
 use crate::cloud::{self, CloudClient, SmartFetchResult};
 use crate::tools::*;
@@ -32,6 +34,27 @@ fn parse_browser(browser: Option<&str>) -> webclaw_fetch::BrowserProfile {
     }
 }
 
+/// Validate that a URL is non-empty and has an http or https scheme.
+fn validate_url(url: &str) -> Result<(), String> {
+    if url.is_empty() {
+        return Err("Invalid URL: must not be empty".into());
+    }
+    match Url::parse(url) {
+        Ok(parsed) if parsed.scheme() == "http" || parsed.scheme() == "https" => Ok(()),
+        Ok(parsed) => Err(format!(
+            "Invalid URL: scheme '{}' not allowed, must start with http:// or https://",
+            parsed.scheme()
+        )),
+        Err(e) => Err(format!("Invalid URL: {e}. Must start with http:// or https://")),
+    }
+}
+
+/// Timeout for local fetch calls (prevents hanging on tarpitting servers).
+const LOCAL_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum poll iterations for research jobs (~10 minutes at 3s intervals).
+const RESEARCH_MAX_POLLS: u32 = 200;
+
 #[tool_router]
 impl WebclawMcp {
     pub async fn new() -> Self {
@@ -46,8 +69,13 @@ impl WebclawMcp {
             config.proxy_pool = pool;
         }
 
-        let fetch_client =
-            webclaw_fetch::FetchClient::new(config).expect("failed to build FetchClient");
+        let fetch_client = match webclaw_fetch::FetchClient::new(config) {
+            Ok(client) => client,
+            Err(e) => {
+                error!("failed to build FetchClient: {e}");
+                std::process::exit(1);
+            }
+        };
 
         let chain = webclaw_llm::ProviderChain::default().await;
         let llm_chain = if chain.is_empty() {
@@ -94,6 +122,7 @@ impl WebclawMcp {
     /// Automatically falls back to the webclaw cloud API when bot protection or JS rendering is detected.
     #[tool]
     async fn scrape(&self, Parameters(params): Parameters<ScrapeParams>) -> Result<String, String> {
+        validate_url(&params.url)?;
         let format = params.format.as_deref().unwrap_or("markdown");
         let browser = parse_browser(params.browser.as_deref());
         let include = params.include_selectors.unwrap_or_default();
@@ -158,6 +187,14 @@ impl WebclawMcp {
     /// Crawl a website starting from a seed URL, following links breadth-first up to a configurable depth and page limit.
     #[tool]
     async fn crawl(&self, Parameters(params): Parameters<CrawlParams>) -> Result<String, String> {
+        validate_url(&params.url)?;
+
+        if let Some(max) = params.max_pages {
+            if max > 500 {
+                return Err("max_pages cannot exceed 500".into());
+            }
+        }
+
         let format = params.format.as_deref().unwrap_or("markdown");
 
         let config = webclaw_fetch::CrawlConfig {
@@ -199,6 +236,7 @@ impl WebclawMcp {
     /// Discover URLs from a website's sitemaps (robots.txt + sitemap.xml).
     #[tool]
     async fn map(&self, Parameters(params): Parameters<MapParams>) -> Result<String, String> {
+        validate_url(&params.url)?;
         let entries = webclaw_fetch::sitemap::discover(&self.fetch_client, &params.url)
             .await
             .map_err(|e| format!("Sitemap discovery failed: {e}"))?;
@@ -216,6 +254,12 @@ impl WebclawMcp {
     async fn batch(&self, Parameters(params): Parameters<BatchParams>) -> Result<String, String> {
         if params.urls.is_empty() {
             return Err("urls must not be empty".into());
+        }
+        if params.urls.len() > 100 {
+            return Err("batch is limited to 100 URLs per request".into());
+        }
+        for u in &params.urls {
+            validate_url(u)?;
         }
 
         let format = params.format.as_deref().unwrap_or("markdown");
@@ -257,6 +301,7 @@ impl WebclawMcp {
         &self,
         Parameters(params): Parameters<ExtractParams>,
     ) -> Result<String, String> {
+        validate_url(&params.url)?;
         let chain = self.llm_chain.as_ref().ok_or(
             "No LLM providers available. Set OPENAI_API_KEY or ANTHROPIC_API_KEY, or run Ollama locally.",
         )?;
@@ -301,6 +346,7 @@ impl WebclawMcp {
         &self,
         Parameters(params): Parameters<SummarizeParams>,
     ) -> Result<String, String> {
+        validate_url(&params.url)?;
         let chain = self.llm_chain.as_ref().ok_or(
             "No LLM providers available. Set OPENAI_API_KEY or ANTHROPIC_API_KEY, or run Ollama locally.",
         )?;
@@ -326,6 +372,7 @@ impl WebclawMcp {
     /// Automatically falls back to the webclaw cloud API when bot protection is detected.
     #[tool]
     async fn diff(&self, Parameters(params): Parameters<DiffParams>) -> Result<String, String> {
+        validate_url(&params.url)?;
         let previous: webclaw_core::ExtractionResult =
             serde_json::from_str(&params.previous_snapshot)
                 .map_err(|e| format!("Failed to parse previous_snapshot JSON: {e}"))?;
@@ -347,8 +394,47 @@ impl WebclawMcp {
                 Ok(serde_json::to_string_pretty(&content_diff).unwrap_or_default())
             }
             SmartFetchResult::Cloud(resp) => {
-                // Can't do local diff with cloud content, return the cloud response directly
-                Ok(serde_json::to_string_pretty(&resp).unwrap_or_default())
+                // Extract markdown from the cloud response and build a minimal
+                // ExtractionResult so we can compute the diff locally.
+                let markdown = resp
+                    .get("markdown")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                if markdown.is_empty() {
+                    return Err(
+                        "Cloud API fallback returned no markdown content; cannot compute diff."
+                            .into(),
+                    );
+                }
+
+                let current = webclaw_core::ExtractionResult {
+                    content: webclaw_core::Content {
+                        markdown: markdown.to_string(),
+                        plain_text: markdown.to_string(),
+                        links: Vec::new(),
+                        images: Vec::new(),
+                        code_blocks: Vec::new(),
+                        raw_html: None,
+                    },
+                    metadata: webclaw_core::Metadata {
+                        title: None,
+                        description: None,
+                        author: None,
+                        published_date: None,
+                        language: None,
+                        url: Some(params.url.clone()),
+                        site_name: None,
+                        image: None,
+                        favicon: None,
+                        word_count: markdown.split_whitespace().count(),
+                    },
+                    domain_data: None,
+                    structured_data: Vec::new(),
+                };
+
+                let content_diff = webclaw_core::diff::diff(&previous, &current);
+                Ok(serde_json::to_string_pretty(&content_diff).unwrap_or_default())
             }
         }
     }
@@ -357,11 +443,12 @@ impl WebclawMcp {
     /// Automatically falls back to the webclaw cloud API when bot protection is detected.
     #[tool]
     async fn brand(&self, Parameters(params): Parameters<BrandParams>) -> Result<String, String> {
-        let fetch_result = self
-            .fetch_client
-            .fetch(&params.url)
-            .await
-            .map_err(|e| format!("Fetch failed: {e}"))?;
+        validate_url(&params.url)?;
+        let fetch_result =
+            tokio::time::timeout(LOCAL_FETCH_TIMEOUT, self.fetch_client.fetch(&params.url))
+                .await
+                .map_err(|_| format!("Fetch timed out after 30s for {}", params.url))?
+                .map_err(|e| format!("Fetch failed: {e}"))?;
 
         // Check for bot protection before extracting brand
         if cloud::is_bot_protected(&fetch_result.html, &fetch_result.headers) {
@@ -415,9 +502,9 @@ impl WebclawMcp {
 
         info!(job_id = %job_id, "research job started, polling for completion");
 
-        // Poll until completed or failed
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // Poll until completed or failed, with a max iteration cap (~10 minutes)
+        for poll in 0..RESEARCH_MAX_POLLS {
+            tokio::time::sleep(Duration::from_secs(3)).await;
 
             let status_resp = cloud.get(&format!("research/{job_id}")).await?;
             let status = status_resp
@@ -445,10 +532,17 @@ impl WebclawMcp {
                     return Err(format!("Research job failed: {error}"));
                 }
                 _ => {
-                    // Still processing, continue polling
+                    if poll % 20 == 19 {
+                        info!(job_id = %job_id, poll, "research still in progress...");
+                    }
                 }
             }
         }
+
+        Err(format!(
+            "Research job {job_id} timed out after ~10 minutes of polling. \
+             Check status manually via the webclaw API: GET /v1/research/{job_id}"
+        ))
     }
 
     /// Search the web for a query and return structured results. Requires WEBCLAW_API_KEY.
@@ -498,7 +592,7 @@ impl WebclawMcp {
 impl ServerHandler for WebclawMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::from_build_env())
+            .with_server_info(Implementation::new("webclaw-mcp", env!("CARGO_PKG_VERSION")))
             .with_instructions(String::from(
                 "Webclaw MCP server -- web content extraction for AI agents. \
                  Tools: scrape, crawl, map, batch, extract, summarize, diff, brand, research, search.",

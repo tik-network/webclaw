@@ -961,7 +961,11 @@ async fn run_crawl(cli: &Cli) -> Result<(), String> {
         result.total, result.ok, result.errors, result.elapsed_secs,
     );
 
-    Ok(())
+    if result.errors > 0 {
+        Err(format!("{} of {} pages failed", result.errors, result.total))
+    } else {
+        Ok(())
+    }
 }
 
 async fn run_map(cli: &Cli) -> Result<(), String> {
@@ -1023,7 +1027,11 @@ async fn run_batch(cli: &Cli, urls: &[String]) -> Result<(), String> {
         errors
     );
 
-    Ok(())
+    if errors > 0 {
+        Err(format!("{errors} of {} URLs failed", results.len()))
+    } else {
+        Ok(())
+    }
 }
 
 async fn run_diff(cli: &Cli, snapshot_path: &str) -> Result<(), String> {

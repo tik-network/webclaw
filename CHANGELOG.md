@@ -3,6 +3,24 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.1] — 2026-03-24
+
+### Fixed
+- MCP server now identifies as `webclaw-mcp` instead of `rmcp` in the MCP handshake
+- Research tool polling caps at 200 iterations (~10 min) instead of looping forever
+- CLI returns non-zero exit codes on errors (invalid format, fetch failures, missing LLM)
+- Text format output strips markdown table syntax (`| --- |` pipes)
+- All MCP tools validate URLs before network calls with clear error messages
+- Cloud API HTTP client has 60s timeout instead of no timeout
+- Local fetch calls timeout after 30s to prevent hanging on slow servers
+- Diff cloud fallback computes actual diff instead of returning raw scrape JSON
+- FetchClient startup failure logs and exits gracefully instead of panicking
+
+### Added
+- Upper bounds: batch capped at 100 URLs, crawl capped at 500 pages
+
+---
+
 ## [0.1.0] — 2026-03-18
 
 First public release. Full-featured web content extraction toolkit for LLMs.

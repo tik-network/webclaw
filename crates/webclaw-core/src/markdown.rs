@@ -786,6 +786,9 @@ fn strip_markdown(md: &str) -> String {
     static ITALIC_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*([^*]+)\*").unwrap());
     static CODE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`([^`]+)`").unwrap());
     static HEADING_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?m)^#{1,6}\s+").unwrap());
+    // Table separator rows: | --- | --- | (with optional colons for alignment)
+    static TABLE_SEP_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"^\|\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|$").unwrap());
 
     let s = IMG_RE.replace_all(md, "$1");
     let s = LINK_RE.replace_all(&s, "$1");
@@ -794,15 +797,31 @@ fn strip_markdown(md: &str) -> String {
     let s = CODE_RE.replace_all(&s, "$1");
     let s = HEADING_RE.replace_all(&s, "");
 
-    // Remove fenced code block markers
-    let mut lines: Vec<&str> = Vec::new();
+    // Remove fenced code block markers + strip table syntax
+    let mut lines: Vec<String> = Vec::new();
     let mut in_fence = false;
     for line in s.lines() {
         if line.trim_start().starts_with("```") {
             in_fence = !in_fence;
             continue;
         }
-        lines.push(line);
+
+        let trimmed = line.trim();
+
+        // Skip table separator rows (| --- | --- |)
+        if TABLE_SEP_RE.is_match(trimmed) {
+            continue;
+        }
+
+        // Convert table data rows: strip leading/trailing pipes, replace inner pipes with tabs
+        if trimmed.starts_with('|') && trimmed.ends_with('|') {
+            let inner = &trimmed[1..trimmed.len() - 1];
+            let cells: Vec<&str> = inner.split('|').map(|c| c.trim()).collect();
+            lines.push(cells.join("\t"));
+            continue;
+        }
+
+        lines.push(line.to_string());
     }
 
     lines.join("\n")
@@ -991,6 +1010,23 @@ mod tests {
         assert!(plain.contains("Hello bold link"));
         assert!(!plain.contains("**"));
         assert!(!plain.contains("["));
+    }
+
+    #[test]
+    fn strips_table_syntax_from_plain_text() {
+        let html = r##"
+        <table>
+            <thead><tr><th>Name</th><th>Age</th></tr></thead>
+            <tbody><tr><td>Alice</td><td>30</td></tr></tbody>
+        </table>"##;
+        let (md, plain, _) = convert_html(html, None);
+        // Markdown should have table syntax
+        assert!(md.contains("| --- |"));
+        // Plain text should NOT have any pipe or separator syntax
+        assert!(!plain.contains("| --- |"), "separator row leaked: {plain}");
+        assert!(!plain.contains("| Name"), "pipe syntax leaked: {plain}");
+        assert!(plain.contains("Name"), "table content missing: {plain}");
+        assert!(plain.contains("Alice"), "table content missing: {plain}");
     }
 
     #[test]

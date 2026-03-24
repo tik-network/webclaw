@@ -3,6 +3,7 @@
 /// When local fetch returns a challenge page, this module retries
 /// via api.webclaw.io. Requires WEBCLAW_API_KEY to be set.
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use tracing::info;
@@ -23,10 +24,11 @@ impl CloudClient {
         if key.is_empty() {
             return None;
         }
-        Some(Self {
-            api_key: key,
-            http: reqwest::Client::new(),
-        })
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .unwrap_or_default();
+        Some(Self { api_key: key, http })
     }
 
     /// Scrape a URL via the cloud API. Returns the response JSON.
@@ -208,10 +210,10 @@ pub async fn smart_fetch(
     only_main_content: bool,
     formats: &[&str],
 ) -> Result<SmartFetchResult, String> {
-    // Step 1: Try local fetch
-    let fetch_result = client
-        .fetch(url)
+    // Step 1: Try local fetch (with timeout to avoid hanging on slow servers)
+    let fetch_result = tokio::time::timeout(Duration::from_secs(30), client.fetch(url))
         .await
+        .map_err(|_| format!("Fetch timed out after 30s for {url}"))?
         .map_err(|e| format!("Fetch failed: {e}"))?;
 
     // Step 2: Check for bot protection
