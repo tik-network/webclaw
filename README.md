@@ -21,6 +21,14 @@
 
 ---
 
+<p align="center">
+  <img src="assets/demo.gif" alt="Claude Code: web_fetch gets 403, webclaw extracts successfully" width="700" />
+  <br/>
+  <sub>Claude Code's built-in web_fetch → 403 Forbidden. webclaw → clean markdown.</sub>
+</p>
+
+---
+
 Your AI agent calls `fetch()` and gets a 403. Or 142KB of raw HTML that burns through your token budget. **webclaw fixes both.**
 
 It extracts clean, structured content from any URL using Chrome-level TLS fingerprinting — no headless browser, no Selenium, no Puppeteer. Output is optimized for LLMs: **67% fewer tokens** than raw HTML, with metadata, links, and images preserved.
