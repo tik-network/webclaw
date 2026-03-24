@@ -1,0 +1,20 @@
+{
+  "name": "webclaw",
+  "description": "Web content extraction MCP server for AI agents. 10 tools with TLS fingerprinting.",
+  "homepage": "https://webclaw.io",
+  "tools": [
+    "scrape",
+    "crawl",
+    "map",
+    "batch",
+    "extract",
+    "summarize",
+    "diff",
+    "brand",
+    "search",
+    "research"
+  ],
+  "install": {
+    "command": "npx create-webclaw"
+  }
+}
