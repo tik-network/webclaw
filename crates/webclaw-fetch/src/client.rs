@@ -466,6 +466,24 @@ impl FetchClient {
         urls: &[&str],
         concurrency: usize,
     ) -> Vec<BatchExtractResult> {
+        self.fetch_and_extract_batch_with_options(
+            urls,
+            concurrency,
+            &webclaw_core::ExtractionOptions::default(),
+        )
+        .await
+    }
+
+    /// Fetch and extract multiple URLs concurrently with custom extraction options.
+    ///
+    /// Same as [`fetch_and_extract_batch`] but applies the given options
+    /// (include/exclude selectors, only-main-content, etc.) to each extraction.
+    pub async fn fetch_and_extract_batch_with_options(
+        self: &Arc<Self>,
+        urls: &[&str],
+        concurrency: usize,
+        options: &webclaw_core::ExtractionOptions,
+    ) -> Vec<BatchExtractResult> {
         let semaphore = Arc::new(Semaphore::new(concurrency));
         let mut handles = Vec::with_capacity(urls.len());
 
@@ -473,10 +491,11 @@ impl FetchClient {
             let permit = Arc::clone(&semaphore);
             let client = Arc::clone(self);
             let url = url.to_string();
+            let opts = options.clone();
 
             handles.push(tokio::spawn(async move {
                 let _permit = permit.acquire().await.expect("semaphore closed");
-                let result = client.fetch_and_extract(&url).await;
+                let result = client.fetch_and_extract_with_options(&url, &opts).await;
                 (idx, BatchExtractResult { url, result })
             }));
         }

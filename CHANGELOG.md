@@ -3,6 +3,13 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.7] — 2026-03-26
+
+### Fixed
+- `--only-main-content`, `--include`, and `--exclude` now work in batch mode (#3)
+
+---
+
 ## [0.1.6] — 2026-03-26
 
 ### Added

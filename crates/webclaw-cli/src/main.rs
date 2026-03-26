@@ -1248,7 +1248,10 @@ async fn run_batch(cli: &Cli, entries: &[(String, Option<String>)]) -> Result<()
     );
 
     let urls: Vec<&str> = entries.iter().map(|(u, _)| u.as_str()).collect();
-    let results = client.fetch_and_extract_batch(&urls, cli.concurrency).await;
+    let options = build_extraction_options(cli);
+    let results = client
+        .fetch_and_extract_batch_with_options(&urls, cli.concurrency, &options)
+        .await;
 
     let ok = results.iter().filter(|r| r.result.is_ok()).count();
     let errors = results.len() - ok;
