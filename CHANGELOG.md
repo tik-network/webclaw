@@ -3,6 +3,14 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.2] — 2026-03-27
+
+### Fixed
+- **`cargo install` broken with primp 1.2.0**: added missing `reqwest` patch to `[patch.crates-io]`. primp moved to reqwest 0.13 which requires a patched fork.
+- **Weekly dependency check**: CI now runs every Monday to catch primp patch drift before users hit it.
+
+---
+
 ## [0.2.1] — 2026-03-27
 
 ### Added
