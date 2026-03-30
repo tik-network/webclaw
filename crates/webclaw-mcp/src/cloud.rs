@@ -2,7 +2,6 @@
 ///
 /// When local fetch returns a challenge page, this module retries
 /// via api.webclaw.io. Requires WEBCLAW_API_KEY to be set.
-use std::collections::HashMap;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -72,7 +71,8 @@ impl CloudClient {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(format!("Cloud API error {status}: {text}"));
+            let truncated = truncate_error(&text);
+            return Err(format!("Cloud API error {status}: {truncated}"));
         }
 
         resp.json::<Value>()
@@ -93,7 +93,8 @@ impl CloudClient {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(format!("Cloud API error {status}: {text}"));
+            let truncated = truncate_error(&text);
+            return Err(format!("Cloud API error {status}: {truncated}"));
         }
 
         resp.json::<Value>()
@@ -102,9 +103,18 @@ impl CloudClient {
     }
 }
 
+/// Truncate error body to avoid flooding logs with huge HTML responses.
+fn truncate_error(text: &str) -> &str {
+    const MAX_LEN: usize = 500;
+    match text.char_indices().nth(MAX_LEN) {
+        Some((byte_pos, _)) => &text[..byte_pos],
+        None => text,
+    }
+}
+
 /// Check if fetched HTML looks like a bot protection challenge page.
 /// Detects common bot protection challenge pages.
-pub fn is_bot_protected(html: &str, headers: &HashMap<String, String>) -> bool {
+pub fn is_bot_protected(html: &str, headers: &webclaw_fetch::HeaderMap) -> bool {
     let html_lower = html.to_lowercase();
 
     // Cloudflare challenge page
@@ -148,9 +158,7 @@ pub fn is_bot_protected(html: &str, headers: &HashMap<String, String>) -> bool {
     }
 
     // Cloudflare via headers + challenge body
-    let has_cf_headers = headers
-        .iter()
-        .any(|(k, _)| k.eq_ignore_ascii_case("cf-ray") || k.eq_ignore_ascii_case("cf-mitigated"));
+    let has_cf_headers = headers.get("cf-ray").is_some() || headers.get("cf-mitigated").is_some();
     if has_cf_headers
         && (html_lower.contains("just a moment") || html_lower.contains("checking your browser"))
     {

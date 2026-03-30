@@ -1,7 +1,6 @@
 /// Document extraction for DOCX, XLSX, XLS, and CSV files.
 /// Auto-detects document type from Content-Type headers or URL extension,
 /// then extracts text content as markdown — same pattern as PDF extraction.
-use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
 use tracing::debug;
@@ -27,11 +26,17 @@ impl DocType {
     }
 }
 
+impl std::fmt::Display for DocType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 /// Detect document type from response headers or URL extension.
 /// Returns `None` for non-document responses (HTML, PDF, etc.).
-pub fn is_document_content_type(headers: &HashMap<String, String>, url: &str) -> Option<DocType> {
+pub fn is_document_content_type(headers: &webclaw_http::HeaderMap, url: &str) -> Option<DocType> {
     // Check Content-Type header first
-    if let Some(ct) = headers.get("content-type") {
+    if let Some(ct) = headers.get("content-type").and_then(|v| v.to_str().ok()) {
         let mime = ct.split(';').next().unwrap_or("").trim();
 
         if mime.eq_ignore_ascii_case(
@@ -155,7 +160,7 @@ fn parse_docx_xml(xml: &str) -> Result<String, FetchError> {
     let mut in_run = false; // inside <w:r> (run)
     let mut in_text = false; // inside <w:t>
     let mut current_text = String::new();
-    let mut heading_level: Option<u8> = 0.into(); // None = normal paragraph
+    let mut heading_level: Option<u8> = None; // None = normal paragraph
     let mut in_ppr = false; // inside <w:pPr> (paragraph properties)
 
     loop {
@@ -469,15 +474,24 @@ fn strip_markdown_formatting(markdown: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use webclaw_http::HeaderMap;
+
+    fn headers_with(name: &str, value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(
+            name.parse::<http::header::HeaderName>().unwrap(),
+            value.parse().unwrap(),
+        );
+        h
+    }
 
     // --- Content-type detection ---
 
     #[test]
     fn test_detect_docx_content_type() {
-        let mut headers = HashMap::new();
-        headers.insert(
-            "content-type".to_string(),
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document".to_string(),
+        let headers = headers_with(
+            "content-type",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         );
         assert_eq!(
             is_document_content_type(&headers, "https://example.com/file"),
@@ -487,10 +501,9 @@ mod tests {
 
     #[test]
     fn test_detect_xlsx_content_type() {
-        let mut headers = HashMap::new();
-        headers.insert(
-            "content-type".to_string(),
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".to_string(),
+        let headers = headers_with(
+            "content-type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         );
         assert_eq!(
             is_document_content_type(&headers, "https://example.com/file"),
@@ -500,11 +513,7 @@ mod tests {
 
     #[test]
     fn test_detect_xls_content_type() {
-        let mut headers = HashMap::new();
-        headers.insert(
-            "content-type".to_string(),
-            "application/vnd.ms-excel".to_string(),
-        );
+        let headers = headers_with("content-type", "application/vnd.ms-excel");
         assert_eq!(
             is_document_content_type(&headers, "https://example.com/file"),
             Some(DocType::Xls)
@@ -513,8 +522,7 @@ mod tests {
 
     #[test]
     fn test_detect_csv_content_type() {
-        let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "text/csv".to_string());
+        let headers = headers_with("content-type", "text/csv");
         assert_eq!(
             is_document_content_type(&headers, "https://example.com/file"),
             Some(DocType::Csv)
@@ -523,11 +531,7 @@ mod tests {
 
     #[test]
     fn test_detect_csv_content_type_with_charset() {
-        let mut headers = HashMap::new();
-        headers.insert(
-            "content-type".to_string(),
-            "text/csv; charset=utf-8".to_string(),
-        );
+        let headers = headers_with("content-type", "text/csv; charset=utf-8");
         assert_eq!(
             is_document_content_type(&headers, "https://example.com/file"),
             Some(DocType::Csv)
@@ -536,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_detect_by_url_extension() {
-        let empty: HashMap<String, String> = HashMap::new();
+        let empty = HeaderMap::new();
         assert_eq!(
             is_document_content_type(&empty, "https://example.com/report.docx"),
             Some(DocType::Docx)
@@ -557,7 +561,7 @@ mod tests {
 
     #[test]
     fn test_detect_url_extension_with_query() {
-        let empty: HashMap<String, String> = HashMap::new();
+        let empty = HeaderMap::new();
         assert_eq!(
             is_document_content_type(&empty, "https://example.com/report.docx?token=abc"),
             Some(DocType::Docx)
@@ -566,7 +570,7 @@ mod tests {
 
     #[test]
     fn test_detect_url_extension_case_insensitive() {
-        let empty: HashMap<String, String> = HashMap::new();
+        let empty = HeaderMap::new();
         assert_eq!(
             is_document_content_type(&empty, "https://example.com/FILE.XLSX"),
             Some(DocType::Xlsx)
@@ -575,8 +579,7 @@ mod tests {
 
     #[test]
     fn test_detect_none_for_html() {
-        let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "text/html".to_string());
+        let headers = headers_with("content-type", "text/html");
         assert_eq!(
             is_document_content_type(&headers, "https://example.com/page"),
             None
@@ -585,8 +588,7 @@ mod tests {
 
     #[test]
     fn test_content_type_takes_precedence_over_url() {
-        let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "text/csv".to_string());
+        let headers = headers_with("content-type", "text/csv");
         // URL says .xlsx but Content-Type says CSV — header wins
         assert_eq!(
             is_document_content_type(&headers, "https://example.com/data.xlsx"),

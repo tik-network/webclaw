@@ -60,7 +60,7 @@ pub struct FetchResult {
     pub status: u16,
     /// Final URL after any redirects.
     pub url: String,
-    pub headers: HashMap<String, String>,
+    pub headers: webclaw_http::HeaderMap,
     pub elapsed: Duration,
 }
 
@@ -257,7 +257,7 @@ impl FetchClient {
         let status = response.status();
         let final_url = response.url().to_string();
 
-        let headers: HashMap<String, String> = response.headers().clone();
+        let headers = response.headers().clone();
 
         let is_pdf = is_pdf_content_type(&headers);
 
@@ -507,9 +507,10 @@ fn is_retryable_error(err: &FetchError) -> bool {
     matches!(err, FetchError::Request(_) | FetchError::BodyDecode(_))
 }
 
-fn is_pdf_content_type(headers: &HashMap<String, String>) -> bool {
+fn is_pdf_content_type(headers: &webclaw_http::HeaderMap) -> bool {
     headers
         .get("content-type")
+        .and_then(|ct| ct.to_str().ok())
         .map(|ct| {
             let mime = ct.split(';').next().unwrap_or("").trim();
             mime.eq_ignore_ascii_case("application/pdf")
@@ -584,7 +585,7 @@ mod tests {
                 html: "<html></html>".to_string(),
                 status: 200,
                 url: "https://example.com".to_string(),
-                headers: HashMap::new(),
+                headers: webclaw_http::HeaderMap::new(),
                 elapsed: Duration::from_millis(42),
             }),
         };
@@ -636,23 +637,20 @@ mod tests {
 
     #[test]
     fn test_is_pdf_content_type() {
-        let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "application/pdf".to_string());
+        let mut headers = webclaw_http::HeaderMap::new();
+        headers.insert("content-type", "application/pdf".parse().unwrap());
         assert!(is_pdf_content_type(&headers));
 
-        headers.insert(
-            "content-type".to_string(),
-            "application/pdf; charset=utf-8".to_string(),
-        );
+        headers.insert("content-type", "application/pdf; charset=utf-8".parse().unwrap());
         assert!(is_pdf_content_type(&headers));
 
-        headers.insert("content-type".to_string(), "Application/PDF".to_string());
+        headers.insert("content-type", "Application/PDF".parse().unwrap());
         assert!(is_pdf_content_type(&headers));
 
-        headers.insert("content-type".to_string(), "text/html".to_string());
+        headers.insert("content-type", "text/html".parse().unwrap());
         assert!(!is_pdf_content_type(&headers));
 
-        let empty: HashMap<String, String> = HashMap::new();
+        let empty = webclaw_http::HeaderMap::new();
         assert!(!is_pdf_content_type(&empty));
     }
 
