@@ -256,13 +256,13 @@ impl FetchClient {
 
         // Cookie warmup: if we get a challenge page, visit the homepage first
         // to collect Akamai cookies (_abck, bm_sz, etc.), then retry.
-        if is_challenge_response(&response) {
-            if let Some(homepage) = extract_homepage(url) {
-                debug!("challenge detected, warming cookies via {homepage}");
-                let _ = client.get(&homepage).await;
-                response = client.get(url).await?;
-                debug!("retried after cookie warmup: status={}", response.status());
-            }
+        if is_challenge_response(&response)
+            && let Some(homepage) = extract_homepage(url)
+        {
+            debug!("challenge detected, warming cookies via {homepage}");
+            let _ = client.get(&homepage).await;
+            response = client.get(url).await?;
+            debug!("retried after cookie warmup: status={}", response.status());
         }
 
         let status = response.status();
