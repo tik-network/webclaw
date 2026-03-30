@@ -252,7 +252,18 @@ impl FetchClient {
 
         let start = Instant::now();
         let client = self.pick_client(url);
-        let response = client.get(url).await?;
+        let mut response = client.get(url).await?;
+
+        // Cookie warmup: if we get a challenge page, visit the homepage first
+        // to collect Akamai cookies (_abck, bm_sz, etc.), then retry.
+        if is_challenge_response(&response) {
+            if let Some(homepage) = extract_homepage(url) {
+                debug!("challenge detected, warming cookies via {homepage}");
+                let _ = client.get(&homepage).await;
+                response = client.get(url).await?;
+                debug!("retried after cookie warmup: status={}", response.status());
+            }
+        }
 
         let status = response.status();
         let final_url = response.url().to_string();
@@ -516,6 +527,38 @@ fn is_pdf_content_type(headers: &webclaw_http::HeaderMap) -> bool {
             mime.eq_ignore_ascii_case("application/pdf")
         })
         .unwrap_or(false)
+}
+
+/// Detect if a response looks like a bot protection challenge page.
+/// Checks for small HTML pages with known challenge markers.
+fn is_challenge_response(response: &webclaw_http::Response) -> bool {
+    // Only check small HTML responses — real pages are typically >10KB
+    let len = response.body().len();
+    if len > 15_000 || len == 0 {
+        return false;
+    }
+
+    let text = response.text();
+    let lower = text.to_lowercase();
+
+    // Akamai Bot Manager challenge
+    if lower.contains("<title>challenge page</title>") {
+        return true;
+    }
+
+    // Akamai sensor script on tiny page
+    if lower.contains("bazadebezolkohpepadr") && len < 5_000 {
+        return true;
+    }
+
+    false
+}
+
+/// Extract the homepage URL (scheme + host) from a full URL.
+fn extract_homepage(url: &str) -> Option<String> {
+    url::Url::parse(url).ok().map(|u| {
+        format!("{}://{}/", u.scheme(), u.host_str().unwrap_or(""))
+    })
 }
 
 /// Convert a webclaw-pdf PdfResult into a webclaw-core ExtractionResult.
