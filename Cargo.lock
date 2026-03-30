@@ -950,7 +950,7 @@ dependencies = [
 [[package]]
 name = "h2"
 version = "0.4.13"
-source = "git+https://github.com/0xMassi/webclaw-tls#fcbd389f90994fc1be1efdde1065713d0ef562d5"
+source = "git+https://github.com/0xMassi/webclaw-tls#e173a4ca9943b6ed103657e806ed6b57fa1d3751"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1050,7 +1050,7 @@ checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 [[package]]
 name = "hyper"
 version = "1.8.1"
-source = "git+https://github.com/0xMassi/webclaw-tls#fcbd389f90994fc1be1efdde1065713d0ef562d5"
+source = "git+https://github.com/0xMassi/webclaw-tls#e173a4ca9943b6ed103657e806ed6b57fa1d3751"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1090,7 +1090,7 @@ dependencies = [
 [[package]]
 name = "hyper-util"
 version = "0.1.20"
-source = "git+https://github.com/0xMassi/webclaw-tls#fcbd389f90994fc1be1efdde1065713d0ef562d5"
+source = "git+https://github.com/0xMassi/webclaw-tls#e173a4ca9943b6ed103657e806ed6b57fa1d3751"
 dependencies = [
  "base64",
  "bytes",
@@ -2024,7 +2024,7 @@ dependencies = [
 [[package]]
 name = "reqwest"
 version = "0.13.2"
-source = "git+https://github.com/0xMassi/webclaw-tls#fcbd389f90994fc1be1efdde1065713d0ef562d5"
+source = "git+https://github.com/0xMassi/webclaw-tls#e173a4ca9943b6ed103657e806ed6b57fa1d3751"
 dependencies = [
  "base64",
  "bytes",
@@ -2158,7 +2158,7 @@ dependencies = [
 [[package]]
 name = "rustls"
 version = "0.23.37"
-source = "git+https://github.com/0xMassi/webclaw-tls#fcbd389f90994fc1be1efdde1065713d0ef562d5"
+source = "git+https://github.com/0xMassi/webclaw-tls#e173a4ca9943b6ed103657e806ed6b57fa1d3751"
 dependencies = [
  "aws-lc-rs",
  "brotli",
@@ -3076,6 +3076,7 @@ version = "0.3.0"
 dependencies = [
  "clap",
  "dotenvy",
+ "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
  "serde_json",
@@ -3094,6 +3095,7 @@ name = "webclaw-core"
 version = "0.3.0"
 dependencies = [
  "ego-tree",
+ "once_cell",
  "regex",
  "rquickjs",
  "scraper",
@@ -3128,8 +3130,8 @@ dependencies = [
 
 [[package]]
 name = "webclaw-http"
-version = "0.1.0"
-source = "git+https://github.com/0xMassi/webclaw-tls#fcbd389f90994fc1be1efdde1065713d0ef562d5"
+version = "0.1.1"
+source = "git+https://github.com/0xMassi/webclaw-tls#e173a4ca9943b6ed103657e806ed6b57fa1d3751"
 dependencies = [
  "bytes",
  "h2",
