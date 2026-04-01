@@ -1,5 +1,5 @@
 /// HTTP client with browser TLS fingerprint impersonation.
-/// Uses webclaw-http for browser-grade TLS + HTTP/2 fingerprinting.
+/// Uses wreq (BoringSSL) for browser-grade TLS + HTTP/2 fingerprinting.
 /// Supports single and batch operations with proxy rotation.
 /// Automatically detects PDF responses and extracts text via webclaw-pdf.
 ///
@@ -60,7 +60,7 @@ pub struct FetchResult {
     pub status: u16,
     /// Final URL after any redirects.
     pub url: String,
-    pub headers: webclaw_http::HeaderMap,
+    pub headers: http::HeaderMap,
     pub elapsed: Duration,
 }
 
@@ -78,20 +78,54 @@ pub struct BatchExtractResult {
     pub result: Result<webclaw_core::ExtractionResult, FetchError>,
 }
 
+/// Buffered response that owns its body. Provides the same sync API
+/// that webclaw-http::Response used to provide.
+struct Response {
+    status: u16,
+    url: String,
+    headers: http::HeaderMap,
+    body: bytes::Bytes,
+}
+
+impl Response {
+    /// Buffer a wreq response into an owned Response.
+    async fn from_wreq(resp: wreq::Response) -> Result<Self, FetchError> {
+        let status = resp.status().as_u16();
+        let url = resp.uri().to_string();
+        let headers = resp.headers().clone();
+        let body = resp.bytes().await.map_err(|e| FetchError::BodyDecode(e.to_string()))?;
+        Ok(Self { status, url, headers, body })
+    }
+
+    fn status(&self) -> u16 { self.status }
+    fn url(&self) -> &str { &self.url }
+    fn headers(&self) -> &http::HeaderMap { &self.headers }
+    fn body(&self) -> &[u8] { &self.body }
+    fn is_success(&self) -> bool { (200..300).contains(&self.status) }
+
+    fn text(&self) -> std::borrow::Cow<'_, str> {
+        String::from_utf8_lossy(&self.body)
+    }
+
+    fn into_text(self) -> String {
+        String::from_utf8_lossy(&self.body).into_owned()
+    }
+}
+
 /// Internal representation of the client pool strategy.
 enum ClientPool {
     /// Pre-built clients with a fixed proxy (or no proxy).
     /// Fingerprint rotation still works via the pool when `random` is true.
     Static {
-        clients: Vec<webclaw_http::Client>,
+        clients: Vec<wreq::Client>,
         random: bool,
     },
     /// Pre-built pool of clients, each with a different proxy + fingerprint.
     /// Requests pick a client deterministically by host for HTTP/2 connection reuse.
-    Rotating { clients: Vec<webclaw_http::Client> },
+    Rotating { clients: Vec<wreq::Client> },
 }
 
-/// HTTP client with browser TLS + HTTP/2 fingerprinting via webclaw-http.
+/// HTTP client with browser TLS + HTTP/2 fingerprinting via wreq.
 ///
 /// Operates in two modes:
 /// - **Static pool**: pre-built clients, optionally with fingerprint rotation.
@@ -105,13 +139,6 @@ pub struct FetchClient {
 
 impl FetchClient {
     /// Build a new client from config.
-    ///
-    /// When `config.proxy_pool` is non-empty, pre-builds one client per proxy,
-    /// each with a randomly assigned fingerprint. Same-host URLs get routed to the
-    /// same client for HTTP/2 connection reuse.
-    ///
-    /// When `proxy_pool` is empty, pre-builds clients at construction time
-    /// (one per fingerprint for `Random` profiles, one for fixed profiles).
     pub fn new(config: FetchConfig) -> Result<Self, FetchError> {
         let variants = collect_variants(&config.browser);
         let pdf_mode = config.pdf_mode.clone();
@@ -119,7 +146,9 @@ impl FetchClient {
         let pool = if config.proxy_pool.is_empty() {
             let clients = variants
                 .into_iter()
-                .map(|v| build_client(&config, v, config.proxy.as_deref()))
+                .map(|v| {
+                    crate::tls::build_client(v, config.timeout, &config.headers, config.proxy.as_deref())
+                })
                 .collect::<Result<Vec<_>, _>>()?;
 
             let random = matches!(config.browser, BrowserProfile::Random);
@@ -137,7 +166,7 @@ impl FetchClient {
                 .iter()
                 .map(|proxy| {
                     let v = *variants.choose(&mut rng).unwrap();
-                    build_client(&config, v, Some(proxy))
+                    crate::tls::build_client(v, config.timeout, &config.headers, Some(proxy))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
@@ -205,19 +234,17 @@ impl FetchClient {
         Err(last_err.unwrap_or_else(|| FetchError::Build("all retries exhausted".into())))
     }
 
-    /// Single fetch attempt. Uses the TLS-impersonated client from the pool.
+    /// Single fetch attempt.
     async fn fetch_once(&self, url: &str) -> Result<FetchResult, FetchError> {
         let start = Instant::now();
         let client = self.pick_client(url);
 
-        let response = client.get(url).await?;
+        let resp = client.get(url).send().await?;
+        let response = Response::from_wreq(resp).await?;
         response_to_result(response, start)
     }
 
     /// Fetch a URL then extract structured content.
-    ///
-    /// Automatically detects PDF responses via Content-Type header and routes
-    /// to webclaw-pdf for text extraction. HTML responses go through webclaw-core.
     #[instrument(skip(self), fields(url = %url))]
     pub async fn fetch_and_extract(
         &self,
@@ -240,7 +267,8 @@ impl FetchClient {
             debug!("reddit detected, fetching {json_url}");
 
             let client = self.pick_client(url);
-            let response = client.get(&json_url).await?;
+            let resp = client.get(&json_url).send().await?;
+            let response = Response::from_wreq(resp).await?;
             if response.is_success() {
                 let bytes = response.body();
                 match crate::reddit::parse_reddit_json(bytes, url) {
@@ -252,7 +280,8 @@ impl FetchClient {
 
         let start = Instant::now();
         let client = self.pick_client(url);
-        let mut response = client.get(url).await?;
+        let resp = client.get(url).send().await?;
+        let mut response = Response::from_wreq(resp).await?;
 
         // Cookie warmup: if we get a challenge page, visit the homepage first
         // to collect Akamai cookies (_abck, bm_sz, etc.), then retry.
@@ -260,8 +289,9 @@ impl FetchClient {
             && let Some(homepage) = extract_homepage(url)
         {
             debug!("challenge detected, warming cookies via {homepage}");
-            let _ = client.get(&homepage).await;
-            response = client.get(url).await?;
+            let _ = client.get(&homepage).send().await;
+            let resp = client.get(url).send().await?;
+            response = Response::from_wreq(resp).await?;
             debug!("retried after cookie warmup: status={}", response.status());
         }
 
@@ -306,7 +336,7 @@ impl FetchClient {
             result.metadata.url = Some(final_url);
             Ok(result)
         } else {
-            let html = response.text().into_owned();
+            let html = response.into_text();
 
             let elapsed = start.elapsed();
             debug!(status, elapsed_ms = %elapsed.as_millis(), "fetch complete");
@@ -399,7 +429,7 @@ impl FetchClient {
     }
 
     /// Pick a client from the pool for a given URL.
-    fn pick_client(&self, url: &str) -> &webclaw_http::Client {
+    fn pick_client(&self, url: &str) -> &wreq::Client {
         match &self.pool {
             ClientPool::Static { clients, random } => {
                 if *random {
@@ -423,9 +453,9 @@ fn collect_variants(profile: &BrowserProfile) -> Vec<BrowserVariant> {
     }
 }
 
-/// Convert a webclaw-http Response into a FetchResult.
+/// Convert a buffered Response into a FetchResult.
 fn response_to_result(
-    response: webclaw_http::Response,
+    response: Response,
     start: Instant,
 ) -> Result<FetchResult, FetchError> {
     let status = response.status();
@@ -455,7 +485,7 @@ fn extract_host(url: &str) -> String {
 
 /// Pick a client deterministically based on a host string.
 /// Same host always gets the same client, enabling HTTP/2 connection reuse.
-fn pick_for_host<'a>(clients: &'a [webclaw_http::Client], host: &str) -> &'a webclaw_http::Client {
+fn pick_for_host<'a>(clients: &'a [wreq::Client], host: &str) -> &'a wreq::Client {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     host.hash(&mut hasher);
     let idx = (hasher.finish() as usize) % clients.len();
@@ -463,41 +493,10 @@ fn pick_for_host<'a>(clients: &'a [webclaw_http::Client], host: &str) -> &'a web
 }
 
 /// Pick a random client from the pool for per-request rotation.
-fn pick_random(clients: &[webclaw_http::Client]) -> &webclaw_http::Client {
+fn pick_random(clients: &[wreq::Client]) -> &wreq::Client {
     use rand::Rng;
     let idx = rand::thread_rng().gen_range(0..clients.len());
     &clients[idx]
-}
-
-/// Build a webclaw-http Client from config + browser variant + optional proxy.
-fn build_client(
-    config: &FetchConfig,
-    variant: BrowserVariant,
-    proxy: Option<&str>,
-) -> Result<webclaw_http::Client, FetchError> {
-    let mut builder = match variant {
-        BrowserVariant::Chrome => webclaw_http::Client::builder().chrome(),
-        BrowserVariant::ChromeMacos => webclaw_http::Client::builder().chrome_macos(),
-        BrowserVariant::Firefox => webclaw_http::Client::builder().firefox(),
-        BrowserVariant::Safari => webclaw_http::Client::builder().safari(),
-        BrowserVariant::Edge => webclaw_http::Client::builder().edge(),
-    };
-
-    builder = builder.timeout(config.timeout);
-
-    for (k, v) in &config.headers {
-        builder = builder.default_header(k, v);
-    }
-
-    if let Some(proxy_url) = proxy {
-        builder = builder
-            .proxy(proxy_url)
-            .map_err(|e| FetchError::Build(format!("proxy: {e}")))?;
-    }
-
-    builder
-        .build()
-        .map_err(|e| FetchError::Build(e.to_string()))
 }
 
 /// Status codes worth retrying: server errors + rate limiting.
@@ -518,7 +517,7 @@ fn is_retryable_error(err: &FetchError) -> bool {
     matches!(err, FetchError::Request(_) | FetchError::BodyDecode(_))
 }
 
-fn is_pdf_content_type(headers: &webclaw_http::HeaderMap) -> bool {
+fn is_pdf_content_type(headers: &http::HeaderMap) -> bool {
     headers
         .get("content-type")
         .and_then(|ct| ct.to_str().ok())
@@ -530,9 +529,7 @@ fn is_pdf_content_type(headers: &webclaw_http::HeaderMap) -> bool {
 }
 
 /// Detect if a response looks like a bot protection challenge page.
-/// Checks for small HTML pages with known challenge markers.
-fn is_challenge_response(response: &webclaw_http::Response) -> bool {
-    // Only check small HTML responses — real pages are typically >10KB
+fn is_challenge_response(response: &Response) -> bool {
     let len = response.body().len();
     if len > 15_000 || len == 0 {
         return false;
@@ -541,12 +538,10 @@ fn is_challenge_response(response: &webclaw_http::Response) -> bool {
     let text = response.text();
     let lower = text.to_lowercase();
 
-    // Akamai Bot Manager challenge
     if lower.contains("<title>challenge page</title>") {
         return true;
     }
 
-    // Akamai sensor script on tiny page
     if lower.contains("bazadebezolkohpepadr") && len < 5_000 {
         return true;
     }
@@ -628,7 +623,7 @@ mod tests {
                 html: "<html></html>".to_string(),
                 status: 200,
                 url: "https://example.com".to_string(),
-                headers: webclaw_http::HeaderMap::new(),
+                headers: http::HeaderMap::new(),
                 elapsed: Duration::from_millis(42),
             }),
         };
@@ -680,7 +675,7 @@ mod tests {
 
     #[test]
     fn test_is_pdf_content_type() {
-        let mut headers = webclaw_http::HeaderMap::new();
+        let mut headers = http::HeaderMap::new();
         headers.insert("content-type", "application/pdf".parse().unwrap());
         assert!(is_pdf_content_type(&headers));
 
@@ -696,7 +691,7 @@ mod tests {
         headers.insert("content-type", "text/html".parse().unwrap());
         assert!(!is_pdf_content_type(&headers));
 
-        let empty = webclaw_http::HeaderMap::new();
+        let empty = http::HeaderMap::new();
         assert!(!is_pdf_content_type(&empty));
     }
 

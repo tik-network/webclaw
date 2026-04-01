@@ -5,7 +5,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum FetchError {
     #[error("request failed: {0}")]
-    Request(#[from] webclaw_http::Error),
+    Request(#[from] wreq::Error),
 
     #[error("invalid url: {0}")]
     InvalidUrl(String),

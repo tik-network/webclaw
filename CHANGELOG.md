@@ -3,6 +3,22 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.3] — 2026-04-01
+
+### Changed
+- **Replaced custom TLS stack with wreq**: migrated from webclaw-tls (patched rustls/h2/hyper/reqwest) to [wreq](https://github.com/0x676e67/wreq) by [@0x676e67](https://github.com/0x676e67). wreq uses BoringSSL for TLS and the [http2](https://github.com/0x676e67/http2) crate for HTTP/2 fingerprinting — both battle-tested with 60+ browser profiles.
+- **Removed all `[patch.crates-io]` entries**: consumers no longer need to patch rustls, h2, hyper, hyper-util, or reqwest. Just depend on webclaw normally.
+- **Browser profiles rebuilt on wreq's Emulation API**: Chrome 145, Firefox 135, Safari 18, Edge 145 with correct TLS options (cipher suites, curves, GREASE, ECH, PSK session resumption), HTTP/2 SETTINGS ordering, pseudo-header order, and header wire order.
+- **Better TLS compatibility**: BoringSSL handles more server configurations than patched rustls (e.g. servers that previously returned IllegalParameter alerts).
+
+### Removed
+- webclaw-tls dependency and all 5 forked crates (webclaw-rustls, webclaw-h2, webclaw-hyper, webclaw-hyper-util, webclaw-reqwest).
+
+### Acknowledgments
+- TLS and HTTP/2 fingerprinting powered by [wreq](https://github.com/0x676e67/wreq) and [http2](https://github.com/0x676e67/http2) by [@0x676e67](https://github.com/0x676e67), who pioneered browser-grade HTTP/2 fingerprinting in Rust.
+
+---
+
 ## [0.3.2] — 2026-03-31
 
 ### Added
@@ -18,17 +34,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Cookie warmup fallback**: when a fetch returns an Akamai challenge page, automatically visits the homepage first to collect `_abck`/`bm_sz` cookies, then retries the original URL. Enables extraction of Akamai-protected subpages (e.g. fansale ticket pages) without JS rendering.
 
 ### Changed
-- Upgraded to webclaw-tls v0.1.2: fixed HTTP header wire order (accept/user-agent were in wrong positions) and added H2 PRIORITY flag in HEADERS frames.
+- Fixed HTTP header wire order (accept/user-agent were in wrong positions) and added H2 PRIORITY flag in HEADERS frames.
 - `FetchResult.headers` now uses `http::HeaderMap` instead of `HashMap<String, String>` — avoids per-response allocation, preserves multi-value headers.
 
 ## [0.3.0] — 2026-03-29
 
 ### Changed
-- **Replaced primp with webclaw-tls**: entire TLS fingerprinting stack is now our own. Zero primp references remain.
-- **Own TLS library**: [webclaw-tls](https://github.com/0xMassi/webclaw-tls) — patched rustls, h2, hyper, hyper-util, reqwest for browser-grade fingerprinting.
-- **Perfect Chrome 146 fingerprint**: JA4 `t13d1517h2_8daaf6152771_b6f405a00624` + Akamai HTTP/2 hash match — the only library in any language to achieve this.
-- **99% bypass rate**: 101/102 sites pass (up from ~85% with primp).
+- **Replaced primp with webclaw-tls**: switched to custom TLS fingerprinting stack.
 - **Browser profiles**: Chrome 146 (Win/Mac), Firefox 135+, Safari 18, Edge 146 — captured from real browsers.
+- **HTTP/2 fingerprinting**: SETTINGS frame ordering and pseudo-header ordering based on concepts pioneered by [@0x676e67](https://github.com/0x676e67).
 
 ### Fixed
 - **HTTPS completely broken (#5)**: primp's forked rustls rejected valid certificates (UnknownIssuer on cross-signed chains like example.com). Fixed by using native OS root CAs alongside Mozilla bundle.

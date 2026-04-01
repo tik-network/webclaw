@@ -315,7 +315,7 @@ Noise removal webclaw     ██████████████████
 webclaw/
   crates/
     webclaw-core     Pure extraction engine. Zero network deps. WASM-safe.
-    webclaw-fetch    HTTP client + TLS fingerprinting. Crawler. Batch ops.
+    webclaw-fetch    HTTP client + TLS fingerprinting (wreq/BoringSSL). Crawler. Batch ops.
     webclaw-llm      LLM provider chain (Ollama -> OpenAI -> Anthropic)
     webclaw-pdf      PDF text extraction
     webclaw-mcp      MCP server (10 tools for AI agents)
@@ -390,6 +390,10 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 - [Good first issues](https://github.com/0xMassi/webclaw/issues?q=label%3A%22good+first+issue%22)
 - [Architecture docs](CONTRIBUTING.md#architecture)
+
+## Acknowledgments
+
+TLS and HTTP/2 browser fingerprinting is powered by [wreq](https://github.com/0x676e67/wreq) and [http2](https://github.com/0x676e67/http2) by [@0x676e67](https://github.com/0x676e67), who pioneered browser-grade HTTP/2 fingerprinting in Rust.
 
 ## License
 
