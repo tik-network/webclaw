@@ -1,6 +1,7 @@
 {
   "name": "create-webclaw",
-  "version": "0.1.0",
+  "version": "0.1.3",
+  "mcpName": "io.github.0xMassi/webclaw",
   "description": "Set up webclaw MCP server for AI agents (Claude, Cursor, Windsurf, OpenCode, Codex, Antigravity)",
   "bin": {
     "create-webclaw": "./index.mjs"
@@ -9,18 +10,27 @@
   "keywords": [
     "webclaw",
     "mcp",
+    "mcp-server",
     "ai",
+    "ai-agent",
     "scraping",
+    "web-scraping",
+    "scraper",
+    "crawler",
+    "extract",
+    "markdown",
+    "llm",
     "claude",
     "cursor",
     "windsurf",
     "opencode",
     "codex",
     "antigravity",
-    "web-scraping"
+    "tls-fingerprint",
+    "cloudflare-bypass"
   ],
   "author": "webclaw",
-  "license": "MIT",
+  "license": "AGPL-3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/0xMassi/webclaw"
