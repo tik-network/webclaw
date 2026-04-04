@@ -181,7 +181,10 @@ fn node_to_md(
             if cell_has_block_content(element) {
                 children_to_md(element, base_url, assets, list_depth, exclude, depth)
             } else {
-                format!("**{}**", inline_text(element, base_url, assets, exclude, depth))
+                format!(
+                    "**{}**",
+                    inline_text(element, base_url, assets, exclude, depth)
+                )
             }
         }
 
@@ -190,7 +193,10 @@ fn node_to_md(
             if cell_has_block_content(element) {
                 children_to_md(element, base_url, assets, list_depth, exclude, depth)
             } else {
-                format!("*{}*", inline_text(element, base_url, assets, exclude, depth))
+                format!(
+                    "*{}*",
+                    inline_text(element, base_url, assets, exclude, depth)
+                )
             }
         }
 
@@ -305,7 +311,8 @@ fn children_to_md(
         match child.value() {
             Node::Element(_) => {
                 if let Some(child_el) = ElementRef::wrap(child) {
-                    let chunk = node_to_md(child_el, base_url, assets, list_depth, exclude, depth + 1);
+                    let chunk =
+                        node_to_md(child_el, base_url, assets, list_depth, exclude, depth + 1);
                     if !chunk.is_empty() && !out.is_empty() && needs_separator(&out, &chunk) {
                         out.push(' ');
                     }
@@ -497,8 +504,26 @@ fn list_items(
 /// table rather than a data table.
 fn cell_has_block_content(cell: ElementRef<'_>) -> bool {
     const BLOCK_TAGS: &[&str] = &[
-        "p", "div", "ul", "ol", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "pre",
-        "table", "section", "article", "header", "footer", "nav", "aside",
+        "p",
+        "div",
+        "ul",
+        "ol",
+        "blockquote",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "pre",
+        "table",
+        "section",
+        "article",
+        "header",
+        "footer",
+        "nav",
+        "aside",
     ];
     for desc in cell.descendants() {
         if let Some(el) = ElementRef::wrap(desc) {
@@ -562,8 +587,7 @@ fn table_to_md(
         let mut out = String::new();
         for row in &raw_rows {
             for cell in row {
-                let content =
-                    children_to_md(*cell, base_url, assets, 0, exclude, depth);
+                let content = children_to_md(*cell, base_url, assets, 0, exclude, depth);
                 let content = content.trim();
                 if !content.is_empty() {
                     if !out.is_empty() {
@@ -1098,11 +1122,20 @@ mod tests {
         </table>"##;
         let (md, _, _) = convert_html(html, None);
         // Should NOT produce markdown table syntax
-        assert!(!md.contains("| "), "layout table should not use pipe syntax: {md}");
+        assert!(
+            !md.contains("| "),
+            "layout table should not use pipe syntax: {md}"
+        );
         // Should contain the content as separate blocks
-        assert!(md.contains("Column one first paragraph"), "missing content: {md}");
+        assert!(
+            md.contains("Column one first paragraph"),
+            "missing content: {md}"
+        );
         assert!(md.contains("Column two content"), "missing content: {md}");
-        assert!(md.contains("Column two after rule"), "missing content: {md}");
+        assert!(
+            md.contains("Column two after rule"),
+            "missing content: {md}"
+        );
     }
 
     #[test]
@@ -1121,10 +1154,22 @@ mod tests {
             </tr>
         </table>"##;
         let (md, _, _) = convert_html(html, None);
-        assert!(!md.contains("| "), "layout table should not use pipe syntax: {md}");
-        assert!(md.contains("[Headline One](https://example.com/1)"), "missing link: {md}");
-        assert!(md.contains("[Headline Two](https://example.com/2)"), "missing link: {md}");
-        assert!(md.contains("[Headline Three](https://example.com/3)"), "missing link: {md}");
+        assert!(
+            !md.contains("| "),
+            "layout table should not use pipe syntax: {md}"
+        );
+        assert!(
+            md.contains("[Headline One](https://example.com/1)"),
+            "missing link: {md}"
+        );
+        assert!(
+            md.contains("[Headline Two](https://example.com/2)"),
+            "missing link: {md}"
+        );
+        assert!(
+            md.contains("[Headline Three](https://example.com/3)"),
+            "missing link: {md}"
+        );
     }
 
     #[test]

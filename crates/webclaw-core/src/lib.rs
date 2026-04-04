@@ -562,9 +562,14 @@ mod tests {
         let html = include_str!("../testdata/express_test.html");
         let result = extract(
             html,
-            Some("https://www.express.co.uk/news/world/2189934/iran-live-donald-trump-uae-dubai-kuwait-attacks"),
+            Some(
+                "https://www.express.co.uk/news/world/2189934/iran-live-donald-trump-uae-dubai-kuwait-attacks",
+            ),
         );
-        assert!(result.is_ok(), "Should not stack overflow on Express.co.uk live blog");
+        assert!(
+            result.is_ok(),
+            "Should not stack overflow on Express.co.uk live blog"
+        );
         let result = result.unwrap();
         assert!(
             result.metadata.word_count > 100,
@@ -588,7 +593,10 @@ mod tests {
         html.push_str("</body></html>");
 
         let result = extract(&html, None);
-        assert!(result.is_ok(), "Should not stack overflow on deeply nested HTML");
+        assert!(
+            result.is_ok(),
+            "Should not stack overflow on deeply nested HTML"
+        );
         let result = result.unwrap();
         assert!(
             result.content.markdown.contains("Deep content"),

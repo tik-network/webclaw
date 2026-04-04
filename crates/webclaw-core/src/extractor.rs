@@ -1492,7 +1492,8 @@ mod form_integration_tests {
     #[test]
     fn aspnet_form_content_extraction() {
         let content = "x".repeat(600); // Ensure >500 chars
-        let html = format!(r#"<html><body>
+        let html = format!(
+            r#"<html><body>
             <form method="post" action="./page.aspx" id="form1">
                 <div class="wrapper">
                     <div class="header"><a href="/">Logo</a></div>
@@ -1503,12 +1504,19 @@ mod form_integration_tests {
                     </div>
                 </div>
             </form>
-        </body></html>"#);
+        </body></html>"#
+        );
         let doc = Html::parse_document(&html);
         let opts = ExtractionOptions::default();
         let result = extract_content(&doc, None, &opts);
-        assert!(result.markdown.contains("Section"), "h2 missing from markdown");
-        assert!(result.markdown.contains("Question"), "h3 missing from markdown");
+        assert!(
+            result.markdown.contains("Section"),
+            "h2 missing from markdown"
+        );
+        assert!(
+            result.markdown.contains("Question"),
+            "h3 missing from markdown"
+        );
     }
 
     /// Simulate unclosed header div absorbing the content div.
@@ -1520,7 +1528,8 @@ mod form_integration_tests {
         // The header div is intentionally NOT closed — the HTML parser makes
         // div.content a child of div.header. The safety valve (>5000 chars)
         // should prevent div.header from being treated as noise.
-        let html = format!(r#"<html><body>
+        let html = format!(
+            r#"<html><body>
             <div class="wrapper">
                 <div class="header"><a href="/">Logo</a>
                 <div class="content">
@@ -1529,11 +1538,18 @@ mod form_integration_tests {
                     <p>{faq}</p>
                 </div>
             </div>
-        </body></html>"#);
+        </body></html>"#
+        );
         let doc = Html::parse_document(&html);
         let opts = ExtractionOptions::default();
         let result = extract_content(&doc, None, &opts);
-        assert!(result.markdown.contains("FAQ Section"), "h2 missing: header swallowed content");
-        assert!(result.markdown.contains("First question"), "h3 missing: header swallowed content");
+        assert!(
+            result.markdown.contains("FAQ Section"),
+            "h2 missing: header swallowed content"
+        );
+        assert!(
+            result.markdown.contains("First question"),
+            "h3 missing: header swallowed content"
+        );
     }
 }

@@ -3,6 +3,18 @@
 All notable changes to webclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.9] — 2026-04-04
+
+### Fixed
+- **Layout tables rendered as sections**: tables used for page layout (containing block elements like `<p>`, `<div>`, `<hr>`) are now rendered as standalone sections instead of pipe-delimited markdown tables. Fixes Drudge Report and similar sites where all content was flattened into a single unreadable line. (by [@devnen](https://github.com/devnen) in #14)
+- **Stack overflow on deeply nested HTML**: pages with 200+ DOM nesting levels (e.g., Express.co.uk live blogs) no longer overflow the stack. Two-layer fix: depth guard in markdown.rs falls back to iterator-based text collection at depth 200, and `extract_with_options()` spawns an 8 MB worker thread for safety on Windows. (by [@devnen](https://github.com/devnen) in #14)
+- **Noise filter swallowing content in malformed HTML**: `<form>` tags no longer unconditionally treated as noise — ASP.NET page-wrapping forms (>500 chars) are preserved. Safety valve prevents unclosed noise containers (header/footer with >5000 chars) from absorbing entire page content. (by [@devnen](https://github.com/devnen) in #14)
+
+### Changed
+- **Bold/italic block passthrough**: `<b>`/`<strong>`/`<em>`/`<i>` tags containing block-level children (e.g., Drudge wrapping columns in `<b>`) now act as transparent containers instead of collapsing everything into inline bold/italic. (by [@devnen](https://github.com/devnen) in #14)
+
+---
+
 ## [0.3.8] — 2026-04-03
 
 ### Fixed

@@ -8,7 +8,8 @@ use scraper::ElementRef;
 
 const NOISE_TAGS: &[&str] = &[
     "script", "style", "noscript", "iframe", "svg", "nav", "aside", "footer", "header", "video",
-    "audio", "canvas",
+    "audio",
+    "canvas",
     // NOTE: <form> removed from this list — ASP.NET and similar frameworks wrap the
     // entire page body in a single <form> tag that contains all real content.
     // Forms are now handled with a heuristic in is_noise() that distinguishes
@@ -205,8 +206,12 @@ pub fn is_noise(el: ElementRef<'_>) -> bool {
         // Also check noise classes/IDs — a big form with class="login-form" is still noise
         if let Some(class) = el.value().attr("class") {
             let cl = class.to_lowercase();
-            if cl.contains("login") || cl.contains("search") || cl.contains("subscribe")
-                || cl.contains("signup") || cl.contains("newsletter") || cl.contains("contact")
+            if cl.contains("login")
+                || cl.contains("search")
+                || cl.contains("subscribe")
+                || cl.contains("signup")
+                || cl.contains("newsletter")
+                || cl.contains("contact")
             {
                 return true;
             }
@@ -809,11 +814,20 @@ mod form_tests {
     fn aspnet_page_wrapping_form_is_not_noise() {
         let html = r#"<html><body><form method="post" action="./page.aspx" id="form1"><div class="wrapper"><div class="content"><h1>Support</h1><h3>Question one?</h3><p>Long answer text that should definitely be captured by the extraction engine. This is real content with multiple sentences to ensure it passes any text length thresholds in the scoring algorithm. We need at least five hundred characters of actual text content here to exceed the threshold. Adding more sentences about various topics including data formats, historical prices, stock market analysis, technical indicators, and trading strategies. This paragraph discusses how intraday data can be used for backtesting quantitative models and developing automated trading systems.</p><h3>Question two?</h3><p>Another substantial answer paragraph with detailed information about the product features and capabilities.</p></div></div></form></body></html>"#;
         let doc = Html::parse_document(html);
-        let form = doc.select(&scraper::Selector::parse("form").unwrap()).next().unwrap();
+        let form = doc
+            .select(&scraper::Selector::parse("form").unwrap())
+            .next()
+            .unwrap();
         let text = form.text().collect::<String>();
         let text_len = text.len();
-        assert!(text_len >= 500, "Form text should be >= 500 chars, got {text_len}");
-        assert!(!is_noise(form), "ASP.NET page-wrapping form should NOT be noise");
+        assert!(
+            text_len >= 500,
+            "Form text should be >= 500 chars, got {text_len}"
+        );
+        assert!(
+            !is_noise(form),
+            "ASP.NET page-wrapping form should NOT be noise"
+        );
     }
 
     #[test]
@@ -828,7 +842,10 @@ mod form_tests {
         </body></html>
         "#;
         let doc = Html::parse_document(html);
-        let form = doc.select(&scraper::Selector::parse("form").unwrap()).next().unwrap();
+        let form = doc
+            .select(&scraper::Selector::parse("form").unwrap())
+            .next()
+            .unwrap();
         assert!(is_noise(form), "Small login form SHOULD be noise");
     }
 }
