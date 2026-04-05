@@ -291,7 +291,31 @@ impl FetchClient {
             let json_url = crate::reddit::json_url(url);
             debug!("reddit detected, fetching {json_url}");
 
-            match reddit_json_fetch(&json_url).await {
+            // Try TLS-fingerprinted client first (wreq), fall back to plain reqwest.
+            let client = self.pick_client(url);
+            let json_result = async {
+                let resp = client.get(&json_url).send().await?;
+                let response = Response::from_wreq(resp).await?;
+                if !response.is_success() {
+                    return Err(FetchError::BodyDecode(format!(
+                        "reddit json returned {}",
+                        response.status()
+                    )));
+                }
+                Ok(response.body().to_vec())
+            }
+            .await;
+
+            // If wreq fails, retry with plain reqwest (no TLS fingerprinting)
+            let json_result = match json_result {
+                Ok(bytes) => Ok(bytes),
+                Err(e) => {
+                    debug!("wreq reddit fetch failed: {e}, trying plain reqwest");
+                    reddit_json_fetch(&json_url).await
+                }
+            };
+
+            match json_result {
                 Ok(bytes) => match crate::reddit::parse_reddit_json(&bytes, url) {
                     Ok(result) => return Ok(result),
                     Err(e) => warn!("reddit json parse failed: {e}, falling back to HTML"),
