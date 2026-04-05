@@ -23,15 +23,9 @@ pub fn is_reddit_url(url: &str) -> bool {
 }
 
 /// Build the `.json` URL from a Reddit page URL.
-/// Uses `old.reddit.com` which is more lenient with non-browser clients.
 pub fn json_url(url: &str) -> String {
     let clean = url.split('?').next().unwrap_or(url).trim_end_matches('/');
-    let old = clean
-        .replace("://www.reddit.com", "://old.reddit.com")
-        .replace("://new.reddit.com", "://old.reddit.com")
-        .replace("://np.reddit.com", "://old.reddit.com")
-        .replace("://reddit.com", "://old.reddit.com");
-    format!("{old}.json")
+    format!("{clean}.json")
 }
 
 /// Convert Reddit JSON API response into an ExtractionResult.
