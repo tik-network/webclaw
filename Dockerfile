@@ -6,10 +6,12 @@
 # ---------------------------------------------------------------------------
 FROM rust:1.93-bookworm AS builder
 
-# Build dependencies: OpenSSL for TLS, pkg-config for linking
+# Build dependencies: cmake + clang for BoringSSL (wreq), pkg-config for linking
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
+    cmake \
+    clang \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -24,7 +26,7 @@ COPY crates/webclaw-pdf/Cargo.toml crates/webclaw-pdf/Cargo.toml
 COPY crates/webclaw-mcp/Cargo.toml crates/webclaw-mcp/Cargo.toml
 COPY crates/webclaw-cli/Cargo.toml crates/webclaw-cli/Cargo.toml
 
-# RUSTFLAGS (reqwest_unstable) — required by Impit's patched rustls
+# Copy .cargo config if present (optional build flags)
 COPY .cargo .cargo
 
 # Create dummy source files so cargo can resolve deps and cache them.

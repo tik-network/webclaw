@@ -3,9 +3,9 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.3.2"
+version = "0.3.9"
 edition = "2024"
-license = "MIT"
+license = "AGPL-3.0"
 repository = "https://github.com/tik-network/webclaw"
 
 [workspace.dependencies]
@@ -22,13 +22,3 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive", "env"] }
 dotenvy = "0.15"
 
-# TLS + HTTP/2 fingerprinting via webclaw-tls.
-# rustls: TLS fingerprinting (JA4 match Chrome 146)
-# h2: HTTP/2 SETTINGS ordering + pseudo-header order
-# hyper/hyper-util/reqwest: passthrough for consistent dependency chain
-[patch.crates-io]
-rustls = { git = "https://github.com/0xMassi/webclaw-tls" }
-h2 = { git = "https://github.com/0xMassi/webclaw-tls" }
-hyper = { git = "https://github.com/0xMassi/webclaw-tls" }
-hyper-util = { git = "https://github.com/0xMassi/webclaw-tls" }
-reqwest = { git = "https://github.com/0xMassi/webclaw-tls" }

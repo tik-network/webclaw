@@ -10,9 +10,9 @@
 </h3>
 
 <p align="center">
-  <a href="https://github.com/tik-network/webclaw/stargazers"><img src="https://img.shields.io/github/stars/tik-network/webclaw?style=for-the-badge&logo=github&logoColor=white&label=Stars&color=181717" alt="Stars" /></a>
-  <a href="https://github.com/tik-network/webclaw/releases"><img src="https://img.shields.io/github/v/release/tik-network/webclaw?style=for-the-badge&logo=rust&logoColor=white&label=Version&color=B7410E" alt="Version" /></a>
-  <a href="https://github.com/tik-network/webclaw/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-10B981?style=for-the-badge" alt="License" /></a>
+  <a href="https://github.com/0xMassi/webclaw/stargazers"><img src="https://img.shields.io/github/stars/0xMassi/webclaw?style=for-the-badge&logo=github&logoColor=white&label=Stars&color=181717" alt="Stars" /></a>
+  <a href="https://github.com/0xMassi/webclaw/releases"><img src="https://img.shields.io/github/v/release/0xMassi/webclaw?style=for-the-badge&logo=rust&logoColor=white&label=Version&color=B7410E" alt="Version" /></a>
+  <a href="https://github.com/0xMassi/webclaw/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-10B981?style=for-the-badge" alt="License" /></a>
   <a href="https://www.npmjs.com/package/create-webclaw"><img src="https://img.shields.io/npm/dt/create-webclaw?style=for-the-badge&logo=npm&logoColor=white&label=Installs&color=CB3837" alt="npm installs" /></a>
 </p>
 <p align="center">
@@ -67,25 +67,25 @@ Auto-detects your AI tools, downloads the MCP server, and configures everything.
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew tap tik-network/webclaw
+brew tap 0xMassi/webclaw
 brew install webclaw
 ```
 
 ### Prebuilt binaries
 
-Download from [GitHub Releases](https://github.com/tik-network/webclaw/releases) for macOS (arm64, x86_64) and Linux (x86_64, aarch64).
+Download from [GitHub Releases](https://github.com/0xMassi/webclaw/releases) for macOS (arm64, x86_64) and Linux (x86_64, aarch64).
 
 ### Cargo (from source)
 
 ```bash
-cargo install --git https://github.com/tik-network/webclaw.git webclaw-cli
-cargo install --git https://github.com/tik-network/webclaw.git webclaw-mcp
+cargo install --git https://github.com/0xMassi/webclaw.git webclaw-cli
+cargo install --git https://github.com/0xMassi/webclaw.git webclaw-mcp
 ```
 
 ### Docker
 
 ```bash
-docker run --rm ghcr.io/tik-network/webclaw https://example.com
+docker run --rm ghcr.io/0xmassi/webclaw https://example.com
 ```
 
 ### Docker Compose (with Ollama for LLM features)
@@ -162,7 +162,7 @@ Crawling... 50/50 pages extracted
 
 ## MCP Server — 10 tools for AI agents
 
-<a href="https://glama.ai/mcp/servers/tik-network/webclaw"><img src="https://glama.ai/mcp/servers/tik-network/webclaw/badge" alt="webclaw MCP server" /></a>
+<a href="https://glama.ai/mcp/servers/0xMassi/webclaw"><img src="https://glama.ai/mcp/servers/0xMassi/webclaw/badge" alt="webclaw MCP server" /></a>
 
 webclaw ships as an MCP server that plugs into Claude Desktop, Claude Code, Cursor, Windsurf, OpenCode, Antigravity, Codex CLI, and any MCP-compatible client.
 
@@ -315,7 +315,7 @@ Noise removal webclaw     ██████████████████
 webclaw/
   crates/
     webclaw-core     Pure extraction engine. Zero network deps. WASM-safe.
-    webclaw-fetch    HTTP client + TLS fingerprinting. Crawler. Batch ops.
+    webclaw-fetch    HTTP client + TLS fingerprinting (wreq/BoringSSL). Crawler. Batch ops.
     webclaw-llm      LLM provider chain (Ollama -> OpenAI -> Anthropic)
     webclaw-pdf      PDF text extraction
     webclaw-mcp      MCP server (10 tools for AI agents)
@@ -363,7 +363,7 @@ webclaw --cloud https://spa-site.com
 ```bash
 npm install @webclaw/sdk                  # TypeScript/JavaScript
 pip install webclaw                        # Python
-go get github.com/tik-network/webclaw-go      # Go
+go get github.com/0xMassi/webclaw-go      # Go
 ```
 
 ---
@@ -382,15 +382,19 @@ go get github.com/tik-network/webclaw-go      # Go
 ## Community
 
 - [Discord](https://discord.gg/KDfd48EpnW) — questions, feedback, show what you built
-- [GitHub Issues](https://github.com/tik-network/webclaw/issues) — bug reports and feature requests
+- [GitHub Issues](https://github.com/0xMassi/webclaw/issues) — bug reports and feature requests
 
 ## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-- [Good first issues](https://github.com/tik-network/webclaw/issues?q=label%3A%22good+first+issue%22)
+- [Good first issues](https://github.com/0xMassi/webclaw/issues?q=label%3A%22good+first+issue%22)
 - [Architecture docs](CONTRIBUTING.md#architecture)
+
+## Acknowledgments
+
+TLS and HTTP/2 browser fingerprinting is powered by [wreq](https://github.com/0x676e67/wreq) and [http2](https://github.com/0x676e67/http2) by [@0x676e67](https://github.com/0x676e67), who pioneered browser-grade HTTP/2 fingerprinting in Rust.
 
 ## License
 
-[MIT](LICENSE) — use it however you want.
+[AGPL-3.0](LICENSE)

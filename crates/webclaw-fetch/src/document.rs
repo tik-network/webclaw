@@ -34,7 +34,7 @@ impl std::fmt::Display for DocType {
 
 /// Detect document type from response headers or URL extension.
 /// Returns `None` for non-document responses (HTML, PDF, etc.).
-pub fn is_document_content_type(headers: &webclaw_http::HeaderMap, url: &str) -> Option<DocType> {
+pub fn is_document_content_type(headers: &http::HeaderMap, url: &str) -> Option<DocType> {
     // Check Content-Type header first
     if let Some(ct) = headers.get("content-type").and_then(|v| v.to_str().ok()) {
         let mime = ct.split(';').next().unwrap_or("").trim();
@@ -474,7 +474,7 @@ fn strip_markdown_formatting(markdown: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use webclaw_http::HeaderMap;
+    use http::HeaderMap;
 
     fn headers_with(name: &str, value: &str) -> HeaderMap {
         let mut h = HeaderMap::new();

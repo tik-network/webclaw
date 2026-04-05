@@ -45,6 +45,13 @@ pub fn to_llm_text(result: &ExtractionResult, url: Option<&str>) -> String {
         }
     }
 
+    // -- 4. Structured data (NEXT_DATA, SvelteKit, JSON-LD) --
+    if !result.structured_data.is_empty() {
+        out.push_str("\n\n## Structured Data\n\n```json\n");
+        out.push_str(&serde_json::to_string_pretty(&result.structured_data).unwrap_or_default());
+        out.push_str("\n```");
+    }
+
     out.trim().to_string()
 }
 

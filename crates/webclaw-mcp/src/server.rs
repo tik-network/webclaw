@@ -319,34 +319,46 @@ impl WebclawMcp {
     }
 
     /// Extract structured data from a web page using an LLM. Provide either a JSON schema or a natural language prompt.
-    /// Automatically falls back to the webclaw cloud API when bot protection is detected.
+    /// Falls back to the webclaw cloud API when no local LLM is available or bot protection is detected.
     #[tool]
     async fn extract(
         &self,
         Parameters(params): Parameters<ExtractParams>,
     ) -> Result<String, String> {
         validate_url(&params.url)?;
-        let chain = self.llm_chain.as_ref().ok_or(
-            "No LLM providers available. Set OPENAI_API_KEY or ANTHROPIC_API_KEY, or run Ollama locally.",
-        )?;
 
         if params.schema.is_none() && params.prompt.is_none() {
             return Err("Either 'schema' or 'prompt' is required for extraction.".into());
         }
 
-        // For extract, if we get a cloud fallback we call the cloud extract endpoint directly
+        // No local LLM — fall back to cloud API directly
+        if self.llm_chain.is_none() {
+            let cloud = self.cloud.as_ref().ok_or(
+                "No LLM providers available. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or WEBCLAW_API_KEY for cloud fallback.",
+            )?;
+            let mut body = json!({"url": params.url});
+            if let Some(ref schema) = params.schema {
+                body["schema"] = json!(schema);
+            }
+            if let Some(ref prompt) = params.prompt {
+                body["prompt"] = json!(prompt);
+            }
+            let resp = cloud.post("extract", body).await?;
+            return Ok(serde_json::to_string_pretty(&resp).unwrap_or_default());
+        }
+
+        let chain = self.llm_chain.as_ref().unwrap();
+
         let llm_content = match self.smart_fetch_llm(&params.url).await? {
             SmartFetchResult::Local(extraction) => {
                 webclaw_core::to_llm_text(&extraction, Some(&params.url))
             }
-            SmartFetchResult::Cloud(resp) => {
-                // Use the LLM format from cloud, fall back to markdown
-                resp.get("llm")
-                    .or_else(|| resp.get("markdown"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string()
-            }
+            SmartFetchResult::Cloud(resp) => resp
+                .get("llm")
+                .or_else(|| resp.get("markdown"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
         };
 
         let data = if let Some(ref schema) = params.schema {
@@ -364,16 +376,32 @@ impl WebclawMcp {
     }
 
     /// Summarize the content of a web page using an LLM.
-    /// Automatically falls back to the webclaw cloud API when bot protection is detected.
+    /// Falls back to the webclaw cloud API when no local LLM is available or bot protection is detected.
     #[tool]
     async fn summarize(
         &self,
         Parameters(params): Parameters<SummarizeParams>,
     ) -> Result<String, String> {
         validate_url(&params.url)?;
-        let chain = self.llm_chain.as_ref().ok_or(
-            "No LLM providers available. Set OPENAI_API_KEY or ANTHROPIC_API_KEY, or run Ollama locally.",
-        )?;
+
+        // No local LLM — fall back to cloud API directly
+        if self.llm_chain.is_none() {
+            let cloud = self.cloud.as_ref().ok_or(
+                "No LLM providers available. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or WEBCLAW_API_KEY for cloud fallback.",
+            )?;
+            let mut body = json!({"url": params.url});
+            if let Some(sentences) = params.max_sentences {
+                body["max_sentences"] = json!(sentences);
+            }
+            let resp = cloud.post("summarize", body).await?;
+            let summary = resp.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+            if summary.is_empty() {
+                return Ok(serde_json::to_string_pretty(&resp).unwrap_or_default());
+            }
+            return Ok(summary.to_string());
+        }
+
+        let chain = self.llm_chain.as_ref().unwrap();
 
         let llm_content = match self.smart_fetch_llm(&params.url).await? {
             SmartFetchResult::Local(extraction) => {
@@ -494,7 +522,8 @@ impl WebclawMcp {
     }
 
     /// Run a deep research investigation on a topic or question. Requires WEBCLAW_API_KEY.
-    /// Starts an async research job on the webclaw cloud API, then polls until complete.
+    /// Saves full result to ~/.webclaw/research/ and returns the file path + key findings.
+    /// Checks cache first — same query returns the cached result without spending credits.
     #[tool]
     async fn research(
         &self,
@@ -504,6 +533,15 @@ impl WebclawMcp {
             .cloud
             .as_ref()
             .ok_or("Research requires WEBCLAW_API_KEY. Get a key at https://webclaw.io")?;
+
+        let research_dir = research_dir();
+        let slug = slugify(&params.query);
+
+        // Check cache first
+        if let Some(cached) = load_cached_research(&research_dir, &slug) {
+            info!(query = %params.query, "returning cached research");
+            return Ok(cached);
+        }
 
         let mut body = json!({ "query": params.query });
         if let Some(deep) = params.deep {
@@ -523,7 +561,7 @@ impl WebclawMcp {
 
         info!(job_id = %job_id, "research job started, polling for completion");
 
-        // Poll until completed or failed, with a max iteration cap (~10 minutes)
+        // Poll until completed or failed
         for poll in 0..RESEARCH_MAX_POLLS {
             tokio::time::sleep(Duration::from_secs(3)).await;
 
@@ -535,15 +573,37 @@ impl WebclawMcp {
 
             match status {
                 "completed" => {
-                    let report = status_resp
-                        .get("report")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    // Save full result to file
+                    let (report_path, json_path) =
+                        save_research(&research_dir, &slug, &status_resp);
 
-                    if report.is_empty() {
-                        return Ok(serde_json::to_string_pretty(&status_resp).unwrap_or_default());
+                    // Build compact response: file paths + findings (no full report)
+                    let sources_count = status_resp
+                        .get("sources_count")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    let findings_count = status_resp
+                        .get("findings_count")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+
+                    let mut response = json!({
+                        "status": "completed",
+                        "query": params.query,
+                        "report_file": report_path,
+                        "json_file": json_path,
+                        "sources_count": sources_count,
+                        "findings_count": findings_count,
+                    });
+
+                    if let Some(findings) = status_resp.get("findings") {
+                        response["findings"] = findings.clone();
                     }
-                    return Ok(report.to_string());
+                    if let Some(sources) = status_resp.get("sources") {
+                        response["sources"] = sources.clone();
+                    }
+
+                    return Ok(serde_json::to_string_pretty(&response).unwrap_or_default());
                 }
                 "failed" => {
                     let error = status_resp
@@ -619,4 +679,89 @@ impl ServerHandler for WebclawMcp {
                  Tools: scrape, crawl, map, batch, extract, summarize, diff, brand, research, search.",
             ))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Research file helpers
+// ---------------------------------------------------------------------------
+
+fn research_dir() -> std::path::PathBuf {
+    let dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".webclaw")
+        .join("research");
+    std::fs::create_dir_all(&dir).ok();
+    dir
+}
+
+fn slugify(query: &str) -> String {
+    let s: String = query
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+        .to_lowercase();
+    if s.len() > 60 { s[..60].to_string() } else { s }
+}
+
+/// Check for a cached research result. Returns the compact response if found.
+fn load_cached_research(dir: &std::path::Path, slug: &str) -> Option<String> {
+    let json_path = dir.join(format!("{slug}.json"));
+    let report_path = dir.join(format!("{slug}.md"));
+
+    if !json_path.exists() || !report_path.exists() {
+        return None;
+    }
+
+    let json_str = std::fs::read_to_string(&json_path).ok()?;
+    let data: serde_json::Value = serde_json::from_str(&json_str).ok()?;
+
+    // Build compact response from cache
+    let mut response = json!({
+        "status": "completed",
+        "cached": true,
+        "query": data.get("query").cloned().unwrap_or(json!("")),
+        "report_file": report_path.to_string_lossy(),
+        "json_file": json_path.to_string_lossy(),
+        "sources_count": data.get("sources_count").cloned().unwrap_or(json!(0)),
+        "findings_count": data.get("findings_count").cloned().unwrap_or(json!(0)),
+    });
+
+    if let Some(findings) = data.get("findings") {
+        response["findings"] = findings.clone();
+    }
+    if let Some(sources) = data.get("sources") {
+        response["sources"] = sources.clone();
+    }
+
+    Some(serde_json::to_string_pretty(&response).unwrap_or_default())
+}
+
+/// Save research result to disk. Returns (report_path, json_path) as strings.
+fn save_research(dir: &std::path::Path, slug: &str, data: &serde_json::Value) -> (String, String) {
+    let json_path = dir.join(format!("{slug}.json"));
+    let report_path = dir.join(format!("{slug}.md"));
+
+    // Save full JSON
+    if let Ok(json_str) = serde_json::to_string_pretty(data) {
+        std::fs::write(&json_path, json_str).ok();
+    }
+
+    // Save report as markdown
+    if let Some(report) = data.get("report").and_then(|v| v.as_str()) {
+        std::fs::write(&report_path, report).ok();
+    }
+
+    (
+        report_path.to_string_lossy().to_string(),
+        json_path.to_string_lossy().to_string(),
+    )
 }
