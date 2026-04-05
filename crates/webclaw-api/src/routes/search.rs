@@ -17,7 +17,6 @@ pub struct SearchRequest {
     pub formats: Option<Vec<String>>,
 }
 
-/// Search result parsed from Google HTML.
 struct SearchResult {
     title: String,
     url: String,
@@ -32,21 +31,28 @@ pub async fn handler(
         return Err(ApiError::BadRequest("query must not be empty".into()));
     }
 
-    let num = req.num_results.unwrap_or(5).min(20);
+    let num = req.num_results.unwrap_or(5).min(25);
     let should_scrape = req.scrape.unwrap_or(true);
 
-    // Fetch Google search results
+    // Try Google first, fall back to DuckDuckGo if blocked
     let encoded_query = urlencoding::encode(&req.query);
-    let search_url = format!("https://www.google.com/search?q={encoded_query}&num={num}");
+    let results = match google_search(&encoded_query, num).await {
+        Ok(r) if !r.is_empty() => {
+            debug!(count = r.len(), "Google search results");
+            r
+        }
+        _ => {
+            debug!("Google blocked, falling back to DuckDuckGo");
+            let html = state
+                .fetch_client
+                .fetch(&format!("https://html.duckduckgo.com/html/?q={encoded_query}"))
+                .await
+                .map_err(|e| ApiError::Internal(format!("Search failed: {e}")))?;
+            parse_ddg_results(&html.html, num)
+        }
+    };
 
-    let fetch_result = state
-        .fetch_client
-        .fetch(&search_url)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Google search fetch failed: {e}")))?;
-
-    let results = parse_google_results(&fetch_result.html, num);
-    debug!(count = results.len(), "parsed Google search results");
+    debug!(count = results.len(), "search results");
 
     if results.is_empty() {
         return Ok(Json(json!({
@@ -56,8 +62,7 @@ pub async fn handler(
         })));
     }
 
-    // Optionally scrape each result URL
-    if should_scrape && !results.is_empty() {
+    if should_scrape {
         let urls: Vec<&str> = results.iter().map(|r| r.url.as_str()).collect();
         let format = req
             .formats
@@ -103,7 +108,6 @@ pub async fn handler(
         })));
     }
 
-    // No scrape — return search results only
     let data: Vec<Value> = results
         .iter()
         .map(|r| {
@@ -122,18 +126,42 @@ pub async fn handler(
     })))
 }
 
-/// Parse Google search result HTML into structured results.
+/// Try Google search with plain reqwest (native-tls).
+async fn google_search(encoded_query: &str, num: usize) -> Result<Vec<SearchResult>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("client: {e}"))?;
+
+    let resp = client
+        .get(format!("https://www.google.com/search?q={encoded_query}&num={num}"))
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .send()
+        .await
+        .map_err(|e| format!("request: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Google returned {}", resp.status()));
+    }
+
+    let html = resp.text().await.map_err(|e| format!("body: {e}"))?;
+    Ok(parse_google_results(&html, num))
+}
+
+/// Parse Google search result HTML.
 fn parse_google_results(html: &str, max: usize) -> Vec<SearchResult> {
     use scraper::{Html, Selector};
 
     let doc = Html::parse_document(html);
     let mut results = Vec::new();
 
-    // Google wraps each result in a div with class "g"
     let result_sel = Selector::parse("div.g").unwrap();
     let link_sel = Selector::parse("a[href]").unwrap();
     let title_sel = Selector::parse("h3").unwrap();
-    let snippet_sel = Selector::parse("div.VwiC3b, span.aCOpRe, div[data-sncf]").unwrap();
+    let snippet_sel =
+        Selector::parse("div.VwiC3b, span.aCOpRe, div[data-sncf], div[style*='line-clamp']")
+            .unwrap();
 
     for element in doc.select(&result_sel) {
         if results.len() >= max {
@@ -178,7 +206,89 @@ fn parse_google_results(html: &str, max: usize) -> Vec<SearchResult> {
     results
 }
 
-/// Minimal URL encoding.
+/// Parse DuckDuckGo HTML search results (fallback when Google blocks).
+fn parse_ddg_results(html: &str, max: usize) -> Vec<SearchResult> {
+    use scraper::{Html, Selector};
+
+    let doc = Html::parse_document(html);
+    let mut results = Vec::new();
+
+    let result_sel = Selector::parse("div.result, div.web-result").unwrap();
+    let link_sel = Selector::parse("a.result__a").unwrap();
+    let snippet_sel = Selector::parse("a.result__snippet").unwrap();
+
+    for element in doc.select(&result_sel) {
+        if results.len() >= max {
+            break;
+        }
+
+        let (title, raw_url) = match element.select(&link_sel).next() {
+            Some(a) => {
+                let title: String = a.text().collect();
+                let href = a.value().attr("href").unwrap_or("").to_string();
+                if title.is_empty() {
+                    continue;
+                }
+                (title, href)
+            }
+            None => continue,
+        };
+
+        let url = extract_ddg_url(&raw_url);
+        if url.is_empty() || !url.starts_with("http") {
+            continue;
+        }
+
+        let snippet = element
+            .select(&snippet_sel)
+            .next()
+            .map(|s| s.text().collect::<String>())
+            .unwrap_or_default();
+
+        results.push(SearchResult {
+            title,
+            url,
+            snippet,
+        });
+    }
+
+    results
+}
+
+/// Extract actual URL from DuckDuckGo redirect.
+fn extract_ddg_url(href: &str) -> String {
+    if let Some(start) = href.find("uddg=") {
+        let encoded = &href[start + 5..];
+        let encoded = encoded.split('&').next().unwrap_or(encoded);
+        url_decode(encoded)
+    } else if href.starts_with("http") {
+        href.to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn url_decode(s: &str) -> String {
+    let mut result = Vec::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(
+                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
+                16,
+            ) {
+                result.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&result).into_owned()
+}
+
 mod urlencoding {
     pub fn encode(s: &str) -> String {
         let mut result = String::with_capacity(s.len() * 3);
