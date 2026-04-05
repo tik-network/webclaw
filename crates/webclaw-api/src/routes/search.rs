@@ -34,23 +34,28 @@ pub async fn handler(
     let num = req.num_results.unwrap_or(5).min(25);
     let should_scrape = req.scrape.unwrap_or(true);
 
-    // Try Google first, fall back to DuckDuckGo if blocked
     let encoded_query = urlencoding::encode(&req.query);
-    let results = match google_search(&encoded_query, num).await {
-        Ok(r) if !r.is_empty() => {
-            debug!(count = r.len(), "Google search results");
-            r
-        }
-        _ => {
-            debug!("Google blocked, falling back to DuckDuckGo");
-            let html = state
-                .fetch_client
-                .fetch(&format!("https://html.duckduckgo.com/html/?q={encoded_query}"))
-                .await
-                .map_err(|e| ApiError::Internal(format!("Search failed: {e}")))?;
-            parse_ddg_results(&html.html, num)
-        }
-    };
+
+    // Startpage proxies Google results without blocking
+    let search_url = format!("https://www.startpage.com/do/dsearch?query={encoded_query}&cat=web");
+    let html = state
+        .fetch_client
+        .fetch(&search_url)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Search failed: {e}")))?;
+
+    let mut results = parse_startpage_results(&html.html, num);
+
+    // Fallback to DuckDuckGo if Startpage returns nothing
+    if results.is_empty() {
+        debug!("Startpage returned no results, falling back to DuckDuckGo");
+        let ddg_html = state
+            .fetch_client
+            .fetch(&format!("https://html.duckduckgo.com/html/?q={encoded_query}"))
+            .await
+            .map_err(|e| ApiError::Internal(format!("Search failed: {e}")))?;
+        results = parse_ddg_results(&ddg_html.html, num);
+    }
 
     debug!(count = results.len(), "search results");
 
@@ -126,42 +131,17 @@ pub async fn handler(
     })))
 }
 
-/// Try Google search with plain reqwest (native-tls).
-async fn google_search(encoded_query: &str, num: usize) -> Result<Vec<SearchResult>, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("client: {e}"))?;
-
-    let resp = client
-        .get(format!("https://www.google.com/search?q={encoded_query}&num={num}"))
-        .header("Accept-Language", "en-US,en;q=0.9")
-        .send()
-        .await
-        .map_err(|e| format!("request: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Google returned {}", resp.status()));
-    }
-
-    let html = resp.text().await.map_err(|e| format!("body: {e}"))?;
-    Ok(parse_google_results(&html, num))
-}
-
-/// Parse Google search result HTML.
-fn parse_google_results(html: &str, max: usize) -> Vec<SearchResult> {
+/// Parse Startpage search results (powered by Google).
+fn parse_startpage_results(html: &str, max: usize) -> Vec<SearchResult> {
     use scraper::{Html, Selector};
 
     let doc = Html::parse_document(html);
     let mut results = Vec::new();
 
-    let result_sel = Selector::parse("div.g").unwrap();
-    let link_sel = Selector::parse("a[href]").unwrap();
-    let title_sel = Selector::parse("h3").unwrap();
-    let snippet_sel =
-        Selector::parse("div.VwiC3b, span.aCOpRe, div[data-sncf], div[style*='line-clamp']")
-            .unwrap();
+    let result_sel = Selector::parse("div.result, div.w-gl__result").unwrap();
+    let link_sel = Selector::parse("a.result-title, a.result-link, a.w-gl__result-title, a[href]").unwrap();
+    let title_sel = Selector::parse("h2, h3, a.result-title, a.result-link").unwrap();
+    let snippet_sel = Selector::parse("p.description, div.description, p.w-gl__description").unwrap();
 
     for element in doc.select(&result_sel) {
         if results.len() >= max {
@@ -171,7 +151,7 @@ fn parse_google_results(html: &str, max: usize) -> Vec<SearchResult> {
         let link = match element.select(&link_sel).next() {
             Some(a) => {
                 let href = a.value().attr("href").unwrap_or("");
-                if href.starts_with("http") {
+                if href.starts_with("http") && !href.contains("startpage.com") {
                     href.to_string()
                 } else {
                     continue;
@@ -180,11 +160,18 @@ fn parse_google_results(html: &str, max: usize) -> Vec<SearchResult> {
             None => continue,
         };
 
-        let title = element
+        let raw_title = element
             .select(&title_sel)
             .next()
             .map(|h| h.text().collect::<String>())
             .unwrap_or_default();
+
+        // Strip inline CSS noise from Startpage titles (e.g. ".css-xxx{...}Title")
+        let title = if let Some(pos) = raw_title.rfind('}') {
+            raw_title[pos + 1..].trim().to_string()
+        } else {
+            raw_title.trim().to_string()
+        };
 
         if title.is_empty() {
             continue;
@@ -194,7 +181,9 @@ fn parse_google_results(html: &str, max: usize) -> Vec<SearchResult> {
             .select(&snippet_sel)
             .next()
             .map(|s| s.text().collect::<String>())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .trim()
+            .to_string();
 
         results.push(SearchResult {
             title,
