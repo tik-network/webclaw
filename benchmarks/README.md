@@ -100,7 +100,7 @@ Note: Bot protection bypass requires the Cloud API with antibot sidecar. The ope
 
 ```bash
 # Clone the repo
-git clone https://github.com/0xMassi/webclaw.git
+git clone https://github.com/tik-network/webclaw.git
 cd webclaw
 
 # Run quality benchmarks (downloads test pages on first run)

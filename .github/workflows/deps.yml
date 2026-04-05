@@ -45,7 +45,7 @@ jobs:
       - name: Trigger server update
         if: steps.diff.outputs.changed == 'true'
         run: |
-          gh api repos/0xMassi/webclaw-server/dispatches \
+          gh api repos/tik-network/webclaw-server/dispatches \
             -f event_type=core-updated \
             -f client_payload[sha]=${{ github.sha }}
         env:

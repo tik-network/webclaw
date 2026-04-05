@@ -120,7 +120,7 @@ jobs:
           tag="${GITHUB_REF#refs/tags/}"
           for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
             dir="webclaw-${tag}-${target}"
-            curl -sSL "https://github.com/0xMassi/webclaw/releases/download/${tag}/${dir}.tar.gz" -o "${target}.tar.gz"
+            curl -sSL "https://github.com/tik-network/webclaw/releases/download/${tag}/${dir}.tar.gz" -o "${target}.tar.gz"
             tar xzf "${target}.tar.gz"
             mkdir -p "binaries-${target}"
             cp "${dir}/webclaw" "binaries-${target}/webclaw"
@@ -136,22 +136,22 @@ jobs:
 
           # amd64
           docker build -f Dockerfile.ci --build-arg BINARY_DIR=binaries-x86_64-unknown-linux-gnu \
-            --platform linux/amd64 -t ghcr.io/0xmassi/webclaw:${tag}-amd64 --push .
+            --platform linux/amd64 -t ghcr.io/tik-network/webclaw:${tag}-amd64 --push .
 
           # arm64
           docker build -f Dockerfile.ci --build-arg BINARY_DIR=binaries-aarch64-unknown-linux-gnu \
-            --platform linux/arm64 -t ghcr.io/0xmassi/webclaw:${tag}-arm64 --push .
+            --platform linux/arm64 -t ghcr.io/tik-network/webclaw:${tag}-arm64 --push .
 
           # Multi-arch manifest
-          docker manifest create ghcr.io/0xmassi/webclaw:${tag} \
-            ghcr.io/0xmassi/webclaw:${tag}-amd64 \
-            ghcr.io/0xmassi/webclaw:${tag}-arm64
-          docker manifest push ghcr.io/0xmassi/webclaw:${tag}
+          docker manifest create ghcr.io/tik-network/webclaw:${tag} \
+            ghcr.io/tik-network/webclaw:${tag}-amd64 \
+            ghcr.io/tik-network/webclaw:${tag}-arm64
+          docker manifest push ghcr.io/tik-network/webclaw:${tag}
 
-          docker manifest create ghcr.io/0xmassi/webclaw:latest \
-            ghcr.io/0xmassi/webclaw:${tag}-amd64 \
-            ghcr.io/0xmassi/webclaw:${tag}-arm64
-          docker manifest push ghcr.io/0xmassi/webclaw:latest
+          docker manifest create ghcr.io/tik-network/webclaw:latest \
+            ghcr.io/tik-network/webclaw:${tag}-amd64 \
+            ghcr.io/tik-network/webclaw:${tag}-arm64
+          docker manifest push ghcr.io/tik-network/webclaw:latest
 
   homebrew:
     name: Update Homebrew
@@ -163,6 +163,6 @@ jobs:
         with:
           formula-name: webclaw
           homebrew-tap: 0xMassi/homebrew-webclaw
-          download-url: https://github.com/0xMassi/webclaw/releases/download/${{ github.ref_name }}/webclaw-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz
+          download-url: https://github.com/tik-network/webclaw/releases/download/${{ github.ref_name }}/webclaw-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz
         env:
           COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

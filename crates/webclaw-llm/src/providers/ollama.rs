@@ -11,6 +11,7 @@ pub struct OllamaProvider {
     client: reqwest::Client,
     base_url: String,
     default_model: String,
+    api_key: Option<String>,
 }
 
 impl OllamaProvider {
@@ -23,10 +24,13 @@ impl OllamaProvider {
             .or_else(|| std::env::var("OLLAMA_MODEL").ok())
             .unwrap_or_else(|| "qwen3:8b".into());
 
+        let api_key = std::env::var("OLLAMA_API_KEY").ok();
+
         Self {
             client: reqwest::Client::new(),
             base_url,
             default_model,
+            api_key,
         }
     }
 
@@ -65,7 +69,11 @@ impl LlmProvider for OllamaProvider {
         }
 
         let url = format!("{}/api/chat", self.base_url);
-        let resp = self.client.post(&url).json(&body).send().await?;
+        let mut req = self.client.post(&url).json(&body);
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let resp = req.send().await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -96,7 +104,11 @@ impl LlmProvider for OllamaProvider {
 
     async fn is_available(&self) -> bool {
         let url = format!("{}/api/tags", self.base_url);
-        matches!(self.client.get(&url).send().await, Ok(r) if r.status().is_success())
+        let mut req = self.client.get(&url);
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
+        }
+        matches!(req.send().await, Ok(r) if r.status().is_success())
     }
 
     fn name(&self) -> &str {

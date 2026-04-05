@@ -2049,6 +2049,35 @@ enum LlmOutput {
     Text(String),
 }
 
+/// Load config from `~/.webclaw/config.json`.
+/// Sets values as env vars so providers pick them up automatically.
+/// Env vars already set take priority (won't be overwritten).
+fn load_config() {
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let path = PathBuf::from(home).join(".webclaw").join("config.json");
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) else {
+        eprintln!("warning: failed to parse {}", path.display());
+        return;
+    };
+    let Some(obj) = json.as_object() else {
+        return;
+    };
+    for (key, value) in obj {
+        let env_key = key.to_uppercase();
+        if std::env::var_os(&env_key).is_none() {
+            if let Some(v) = value.as_str() {
+                // SAFETY: called once at startup before any threads are spawned.
+                unsafe { std::env::set_var(&env_key, v) };
+            }
+        }
+    }
+}
+
 /// Returns true if any LLM flag is set.
 fn has_llm_flags(cli: &Cli) -> bool {
     cli.extract_json.is_some() || cli.extract_prompt.is_some() || cli.summarize.is_some()
@@ -2057,6 +2086,7 @@ fn has_llm_flags(cli: &Cli) -> bool {
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
+    load_config();
 
     let cli = Cli::parse();
     init_logging(cli.verbose);

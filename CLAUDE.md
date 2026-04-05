@@ -152,5 +152,5 @@ Add to Claude Desktop config (`~/Library/Application Support/Claude/claude_deskt
 
 ## Git
 
-- Remote: `git@github.com:0xMassi/webclaw.git`
+- Remote: `git@github.com:tik-network/webclaw.git`
 - Use `/commit` skill for commits

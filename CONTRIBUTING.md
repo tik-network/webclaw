@@ -11,7 +11,7 @@ Thanks for your interest in contributing. This document covers the essentials.
 
 2. Clone and build:
    ```bash
-   git clone https://github.com/0xMassi/webclaw.git
+   git clone https://github.com/tik-network/webclaw.git
    cd webclaw
    cargo build --release
    ```

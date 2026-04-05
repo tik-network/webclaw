@@ -88,8 +88,15 @@ check_prerequisites() {
             all_good=false
         fi
     else
-        error "Rust not found. Install: https://rustup.rs"
-        all_good=false
+        warn "Rust not found."
+        if prompt_yn "Install Rust via rustup?" "y"; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            source "$HOME/.cargo/env"
+            success "Rust $(rustc --version | awk '{print $2}') installed"
+        else
+            error "Rust is required. Install manually: https://rustup.rs"
+            all_good=false
+        fi
     fi
 
     # cargo

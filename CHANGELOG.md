@@ -53,7 +53,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.2.1] — 2026-03-27
 
 ### Added
-- **Docker image on GHCR**: `docker run ghcr.io/0xmassi/webclaw` — auto-built on every release
+- **Docker image on GHCR**: `docker run ghcr.io/tik-network/webclaw` — auto-built on every release
 - **QuickJS data island extraction**: inline `<script>` execution catches `window.__PRELOADED_STATE__`, Next.js hydration data, and other JS-embedded content
 
 ### Fixed

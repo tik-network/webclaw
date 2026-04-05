@@ -235,18 +235,18 @@ impl FetchClient {
         options: &webclaw_core::ExtractionOptions,
     ) -> Result<webclaw_core::ExtractionResult, FetchError> {
         // Reddit fallback: use their JSON API to get post + full comment tree.
+        // Must use a plain reqwest client — Reddit blocks TLS-fingerprinted clients
+        // on their .json API but accepts standard requests with a browser User-Agent.
         if crate::reddit::is_reddit_url(url) {
             let json_url = crate::reddit::json_url(url);
             debug!("reddit detected, fetching {json_url}");
 
-            let client = self.pick_client(url);
-            let response = client.get(&json_url).await?;
-            if response.is_success() {
-                let bytes = response.body();
-                match crate::reddit::parse_reddit_json(bytes, url) {
+            match reddit_json_fetch(&json_url).await {
+                Ok(bytes) => match crate::reddit::parse_reddit_json(&bytes, url) {
                     Ok(result) => return Ok(result),
-                    Err(e) => warn!("reddit json fallback failed: {e}, falling back to HTML"),
-                }
+                    Err(e) => warn!("reddit json parse failed: {e}, falling back to HTML"),
+                },
+                Err(e) => warn!("reddit json fetch failed: {e}, falling back to HTML"),
             }
         }
 
@@ -467,6 +467,35 @@ fn pick_random(clients: &[webclaw_http::Client]) -> &webclaw_http::Client {
     use rand::Rng;
     let idx = rand::thread_rng().gen_range(0..clients.len());
     &clients[idx]
+}
+
+/// Fetch Reddit `.json` endpoint with a plain reqwest client (no TLS fingerprinting).
+/// Reddit blocks fingerprinted clients on their JSON API but accepts standard requests.
+async fn reddit_json_fetch(json_url: &str) -> Result<Vec<u8>, FetchError> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| FetchError::Build(format!("reddit plain client: {e}")))?;
+
+    let response = client
+        .get(json_url)
+        .send()
+        .await
+        .map_err(|e| FetchError::BodyDecode(format!("reddit request: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(FetchError::BodyDecode(format!(
+            "reddit json returned {}",
+            response.status()
+        )));
+    }
+
+    response
+        .bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| FetchError::BodyDecode(format!("reddit body: {e}")))
 }
 
 /// Build a webclaw-http Client from config + browser variant + optional proxy.
