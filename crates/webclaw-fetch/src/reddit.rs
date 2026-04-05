@@ -1,13 +1,13 @@
 /// Reddit JSON API fallback for extracting posts + comments without JS rendering.
 ///
-/// Reddit's new `shreddit` frontend only SSRs the post body — comments are
-/// loaded client-side. Appending `.json` to any Reddit URL returns the full
-/// comment tree as structured JSON, which we convert to clean markdown.
+/// Handles all Reddit page types: post pages, subreddit listings, comment feeds,
+/// user profiles, search results, etc. Appending `.json` to any Reddit URL
+/// returns structured JSON which we convert to clean markdown.
 use serde::Deserialize;
 use tracing::debug;
 use webclaw_core::{Content, ExtractionResult, Metadata};
 
-/// Check if a URL points to a Reddit post/comment page.
+/// Check if a URL points to a Reddit page.
 pub fn is_reddit_url(url: &str) -> bool {
     let host = url
         .split("://")
@@ -29,9 +29,8 @@ pub fn json_url(url: &str) -> String {
 }
 
 /// Convert Reddit JSON API response into an ExtractionResult.
-/// Handles both post pages (JSON array) and subreddit/listing pages (single JSON object).
+/// Generic: handles arrays (post pages), single objects (listings), any mix of t1/t3/t5.
 pub fn parse_reddit_json(json_bytes: &[u8], url: &str) -> Result<ExtractionResult, String> {
-    // Post pages return [post_listing, comment_listing], subreddit pages return a single listing.
     let listings: Vec<Listing> = serde_json::from_slice(json_bytes).or_else(|_| {
         let single: Listing =
             serde_json::from_slice(json_bytes).map_err(|e| format!("reddit json parse: {e}"))?;
@@ -43,79 +42,13 @@ pub fn parse_reddit_json(json_bytes: &[u8], url: &str) -> Result<ExtractionResul
     let mut author = None;
     let mut subreddit = None;
 
-    let is_listing_page = listings.len() == 1;
-
-    // First listing = post(s)
-    if let Some(post_listing) = listings.first() {
-        let posts: Vec<_> = post_listing
-            .data
-            .children
-            .iter()
-            .filter(|c| c.kind == "t3")
-            .collect();
-
-        if is_listing_page && posts.len() > 1 {
-            // Subreddit listing: render as a list of posts
-            subreddit = posts
-                .first()
-                .and_then(|p| p.data.subreddit_name_prefixed.clone());
-            if let Some(ref sr) = subreddit {
-                markdown.push_str(&format!("# {sr}\n\n"));
+    for listing in &listings {
+        for child in &listing.data.children {
+            match child.kind.as_str() {
+                "t3" => render_post(child, &mut markdown, &mut title, &mut author, &mut subreddit),
+                "t1" => render_comment(child, 0, &mut markdown),
+                _ => {}
             }
-            for post in &posts {
-                let d = &post.data;
-                let t = d.title.as_deref().unwrap_or("[untitled]");
-                let a = d.author.as_deref().unwrap_or("[deleted]");
-                let score = d.score.unwrap_or(0);
-                markdown.push_str(&format!("- **{t}** — u/{a} ({score} pts)\n"));
-                if let Some(ref body) = d.selftext
-                    && !body.is_empty()
-                {
-                    let preview: String = body.chars().take(200).collect();
-                    markdown.push_str(&format!("  {preview}\n"));
-                }
-                if let Some(ref link) = d.url_overridden_by_dest
-                    && !link.is_empty()
-                {
-                    markdown.push_str(&format!("  [Link]({link})\n"));
-                }
-                markdown.push('\n');
-            }
-        } else {
-            // Single post page
-            for post in &posts {
-                let d = &post.data;
-                title = d.title.clone();
-                author = d.author.clone();
-                subreddit = d.subreddit_name_prefixed.clone();
-
-                if let Some(ref t) = title {
-                    markdown.push_str(&format!("# {t}\n\n"));
-                }
-                if let (Some(a), Some(sr)) = (&author, &subreddit) {
-                    markdown.push_str(&format!("**u/{a}** in {sr}\n\n"));
-                }
-                if let Some(ref body) = d.selftext
-                    && !body.is_empty()
-                {
-                    markdown.push_str(body);
-                    markdown.push_str("\n\n");
-                }
-                if let Some(ref url_field) = d.url_overridden_by_dest
-                    && !url_field.is_empty()
-                {
-                    markdown.push_str(&format!("[Link]({url_field})\n\n"));
-                }
-                markdown.push_str("---\n\n");
-            }
-        }
-    }
-
-    // Second listing = comment tree (only on post pages)
-    if let Some(comment_listing) = listings.get(1) {
-        markdown.push_str("## Comments\n\n");
-        for child in &comment_listing.data.children {
-            render_comment(child, 0, &mut markdown);
         }
     }
 
@@ -148,6 +81,45 @@ pub fn parse_reddit_json(json_bytes: &[u8], url: &str) -> Result<ExtractionResul
     })
 }
 
+/// Render a post (t3). If it's the first post, use it as the page title.
+fn render_post(
+    thing: &Thing,
+    out: &mut String,
+    page_title: &mut Option<String>,
+    page_author: &mut Option<String>,
+    page_subreddit: &mut Option<String>,
+) {
+    let d = &thing.data;
+    let t = d.title.as_deref().unwrap_or("[untitled]");
+    let a = d.author.as_deref().unwrap_or("[deleted]");
+    let sr = d.subreddit_name_prefixed.as_deref().unwrap_or("");
+    let score = d.score.unwrap_or(0);
+
+    // First post sets page metadata
+    if page_title.is_none() {
+        *page_title = d.title.clone();
+        *page_author = d.author.clone();
+        *page_subreddit = d.subreddit_name_prefixed.clone();
+    }
+
+    out.push_str(&format!("### {t}\n\n"));
+    out.push_str(&format!("**u/{a}** in {sr} ({score} pts)\n\n"));
+
+    if let Some(ref body) = d.selftext
+        && !body.is_empty()
+    {
+        out.push_str(body);
+        out.push_str("\n\n");
+    }
+    if let Some(ref link) = d.url_overridden_by_dest
+        && !link.is_empty()
+    {
+        out.push_str(&format!("[Link]({link})\n\n"));
+    }
+    out.push_str("---\n\n");
+}
+
+/// Render a comment (t1) with indentation for nesting.
 fn render_comment(thing: &Thing, depth: usize, out: &mut String) {
     if thing.kind != "t1" {
         return;
@@ -158,13 +130,19 @@ fn render_comment(thing: &Thing, depth: usize, out: &mut String) {
     let body = d.body.as_deref().unwrap_or("[removed]");
     let score = d.score.unwrap_or(0);
 
+    // Show which post this comment is on (for comment feed pages)
+    if depth == 0 {
+        if let Some(ref link_title) = d.link_title {
+            out.push_str(&format!("**Re: {link_title}**\n"));
+        }
+    }
+
     out.push_str(&format!("{indent}- **u/{author}** ({score} pts)\n"));
     for line in body.lines() {
         out.push_str(&format!("{indent}  {line}\n"));
     }
     out.push('\n');
 
-    // Recurse into replies
     if let Some(Replies::Listing(listing)) = &d.replies {
         for child in &listing.data.children {
             render_comment(child, depth + 1, out);
@@ -172,7 +150,7 @@ fn render_comment(thing: &Thing, depth: usize, out: &mut String) {
     }
 }
 
-// --- Reddit JSON types (minimal) ---
+// --- Reddit JSON types (minimal, permissive) ---
 
 #[derive(Deserialize)]
 struct Listing {
@@ -202,6 +180,8 @@ struct ThingData {
     body: Option<String>,
     score: Option<i64>,
     replies: Option<Replies>,
+    /// Title of the parent post (present on comments in feed pages)
+    link_title: Option<String>,
 }
 
 /// Reddit replies can be either a nested Listing or an empty string.
