@@ -1,0 +1,32 @@
+[package]
+name = "webclaw-api"
+description = "Self-hosted REST API server for webclaw web extraction toolkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "webclaw-api"
+path = "src/main.rs"
+
+[dependencies]
+webclaw-core = { workspace = true }
+webclaw-fetch = { workspace = true }
+webclaw-llm = { workspace = true }
+webclaw-pdf = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+dotenvy = { workspace = true }
+thiserror = { workspace = true }
+axum = { version = "0.8", features = ["macros"] }
+tower-http = { version = "0.6", features = ["cors"] }
+tower = { version = "0.5", features = ["util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+uuid = { version = "1", features = ["v4"] }
+dashmap = "6"
+url = "2"
+scraper = "0.22"
