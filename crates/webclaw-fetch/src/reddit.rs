@@ -29,20 +29,62 @@ pub fn json_url(url: &str) -> String {
 }
 
 /// Convert Reddit JSON API response into an ExtractionResult.
+/// Handles both post pages (JSON array) and subreddit/listing pages (single JSON object).
 pub fn parse_reddit_json(json_bytes: &[u8], url: &str) -> Result<ExtractionResult, String> {
-    let listings: Vec<Listing> =
-        serde_json::from_slice(json_bytes).map_err(|e| format!("reddit json parse: {e}"))?;
+    // Post pages return [post_listing, comment_listing], subreddit pages return a single listing.
+    let listings: Vec<Listing> = serde_json::from_slice(json_bytes).or_else(|_| {
+        let single: Listing =
+            serde_json::from_slice(json_bytes).map_err(|e| format!("reddit json parse: {e}"))?;
+        Ok::<_, String>(vec![single])
+    })?;
 
     let mut markdown = String::new();
     let mut title = None;
     let mut author = None;
     let mut subreddit = None;
 
-    // First listing = the post itself
+    let is_listing_page = listings.len() == 1;
+
+    // First listing = post(s)
     if let Some(post_listing) = listings.first() {
-        for child in &post_listing.data.children {
-            if child.kind == "t3" {
-                let d = &child.data;
+        let posts: Vec<_> = post_listing
+            .data
+            .children
+            .iter()
+            .filter(|c| c.kind == "t3")
+            .collect();
+
+        if is_listing_page && posts.len() > 1 {
+            // Subreddit listing: render as a list of posts
+            subreddit = posts
+                .first()
+                .and_then(|p| p.data.subreddit_name_prefixed.clone());
+            if let Some(ref sr) = subreddit {
+                markdown.push_str(&format!("# {sr}\n\n"));
+            }
+            for post in &posts {
+                let d = &post.data;
+                let t = d.title.as_deref().unwrap_or("[untitled]");
+                let a = d.author.as_deref().unwrap_or("[deleted]");
+                let score = d.score.unwrap_or(0);
+                markdown.push_str(&format!("- **{t}** — u/{a} ({score} pts)\n"));
+                if let Some(ref body) = d.selftext
+                    && !body.is_empty()
+                {
+                    let preview: String = body.chars().take(200).collect();
+                    markdown.push_str(&format!("  {preview}\n"));
+                }
+                if let Some(ref link) = d.url_overridden_by_dest
+                    && !link.is_empty()
+                {
+                    markdown.push_str(&format!("  [Link]({link})\n"));
+                }
+                markdown.push('\n');
+            }
+        } else {
+            // Single post page
+            for post in &posts {
+                let d = &post.data;
                 title = d.title.clone();
                 author = d.author.clone();
                 subreddit = d.subreddit_name_prefixed.clone();
@@ -69,7 +111,7 @@ pub fn parse_reddit_json(json_bytes: &[u8], url: &str) -> Result<ExtractionResul
         }
     }
 
-    // Second listing = comment tree
+    // Second listing = comment tree (only on post pages)
     if let Some(comment_listing) = listings.get(1) {
         markdown.push_str("## Comments\n\n");
         for child in &comment_listing.data.children {
